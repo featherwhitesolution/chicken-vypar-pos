@@ -13,7 +13,7 @@ export default function Login({ onLogin }) {
     } else if (username === 'admin' && password === '1123456') {
       onLogin({ username, role });
     } else {
-      alert("Invalid credentials. Try admin_farhan / Farhans@27 or admin / 1123456");
+      alert("Invalid username or password. Please try again.");
     }
   };
 
@@ -102,20 +102,6 @@ export default function Login({ onLogin }) {
               <ArrowRight className="ml-2 w-5 h-5" />
             </button>
           </form>
-
-          <div className="text-center mt-6 pt-4 border-t border-slate-100 dark:border-slate-800/80">
-            <button
-              type="button"
-              onClick={() => {
-                setUsername('admin_farhan');
-                setPassword('Farhans@27');
-                setRole('Developer');
-              }}
-              className="text-xs font-bold text-red-650 hover:text-red-700 dark:text-rose-450 dark:hover:text-rose-350 flex items-center justify-center gap-1.5 mx-auto cursor-pointer"
-            >
-              <Shield className="w-3.5 h-3.5" /> Access Developer Admin Portal
-            </button>
-          </div>
         </div>
       </div>
     </div>
