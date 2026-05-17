@@ -1,0 +1,155 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary-50: #fff1f2;
+  --color-primary-100: #ffe4e6;
+  --color-primary-200: #fecdd3;
+  --color-primary-300: #fda4af;
+  --color-primary-400: #fb7185;
+  --color-primary-500: #f43f5e;
+  --color-primary-600: #e11d48;
+  --color-primary-700: #be123c;
+  --color-primary-800: #9f1239;
+  --color-primary-900: #881337;
+
+  --font-sans: 'Inter', system-ui, sans-serif;
+}
+
+@layer base {
+  :root {
+    --background: #f8fafc;
+    --foreground: #0f172a;
+  }
+  .dark {
+    --background: #0b0f19;
+    --foreground: #f8fafc;
+  }
+  
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+  }
+}
+
+@layer utilities {
+  .glass-panel {
+    background: rgba(255, 255, 255, 0.65);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+  }
+  
+  .dark .glass-panel {
+    background: rgba(17, 24, 39, 0.65);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+  }
+
+  .text-gradient {
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-image: linear-gradient(to right, var(--color-primary-500), var(--color-primary-700));
+  }
+  
+  .dark .text-gradient {
+    background-image: linear-gradient(to right, var(--color-primary-400), var(--color-primary-600));
+  }
+
+  .print-only {
+    display: none;
+  }
+}
+
+@media print {
+  @page {
+    margin: 0;
+    size: 80mm auto;
+  }
+  body {
+    background-color: white !important;
+    color: black !important;
+    margin: 0;
+    padding: 0;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  
+  /* Thermal Printer Receipt Styles */
+  .receipt-wrapper {
+    width: 80mm;
+    margin: 0;
+    padding: 10px 15px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 12px;
+    line-height: 1.4;
+    color: black;
+  }
+  .receipt-header {
+    text-align: center;
+    margin-bottom: 15px;
+    border-bottom: 1px dashed black;
+    padding-bottom: 10px;
+  }
+  .receipt-header h1 {
+    font-size: 18px;
+    font-weight: bold;
+    margin: 0 0 5px 0;
+  }
+  .receipt-header p {
+    margin: 0;
+    font-size: 11px;
+  }
+  .receipt-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 10px;
+  }
+  .receipt-table th {
+    border-bottom: 1px dashed black;
+    text-align: left;
+    padding-bottom: 5px;
+    font-weight: bold;
+  }
+  .receipt-table td {
+    padding: 5px 0;
+    vertical-align: top;
+  }
+  .receipt-table .right {
+    text-align: right;
+  }
+  .receipt-table .center {
+    text-align: center;
+  }
+  .receipt-totals {
+    border-top: 1px dashed black;
+    padding-top: 10px;
+    margin-bottom: 15px;
+  }
+  .receipt-totals .row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 5px;
+  }
+  .receipt-totals .bold {
+    font-weight: bold;
+    font-size: 14px;
+  }
+  .receipt-footer {
+    text-align: center;
+    border-top: 1px dashed black;
+    padding-top: 10px;
+    font-size: 11px;
+  }
+}
