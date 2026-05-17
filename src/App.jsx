@@ -277,15 +277,58 @@ function App() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-              {/* Existing Workspace Ready card */}
-              <div className="lg:col-span-2 glass-panel rounded-2xl p-8 flex flex-col items-center justify-center min-h-[300px] md:min-h-[400px] text-center">
-                <div className="w-24 h-24 mb-6 rounded-full overflow-hidden shadow-2xl shadow-primary-500/20 transform transition-transform hover:scale-105 border-4 border-white dark:border-slate-800 shrink-0">
-                  <img src="/logo.png" alt="Logo" className="w-full h-full object-cover bg-white" />
+              {/* Quick Actions & Live Market Rates Card */}
+              <div className="lg:col-span-2 glass-panel rounded-3xl p-6 md:p-8 flex flex-col justify-between min-h-[300px] md:min-h-[400px]">
+                <div className="text-left">
+                  <h3 className="text-xl font-extrabold mb-2 tracking-tight text-slate-850 dark:text-white">Quick Actions</h3>
+                  <p className="text-slate-500 dark:text-slate-400 text-sm mb-6">Frequently used tools to manage your chicken shop operations.</p>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <button 
+                      onClick={() => setActiveTab('pos')}
+                      className="p-4 rounded-2xl bg-gradient-to-br from-blue-500/10 to-indigo-500/10 hover:from-blue-500/15 hover:to-indigo-500/15 border border-blue-500/20 text-left transition-all group cursor-pointer hover:scale-[1.02] active:scale-95"
+                    >
+                      <ShoppingCart className="w-6 h-6 text-blue-500 mb-2 group-hover:scale-110 transition-transform" />
+                      <span className="block font-bold text-slate-800 dark:text-white text-sm">New Billing POS</span>
+                      <span className="block text-slate-500 text-[11px] mt-0.5">Start a fresh customer sale</span>
+                    </button>
+
+                    <button 
+                      onClick={() => setActiveTab('stock')}
+                      className="p-4 rounded-2xl bg-gradient-to-br from-emerald-500/10 to-teal-500/10 hover:from-emerald-500/15 hover:to-teal-500/15 border border-emerald-500/20 text-left transition-all group cursor-pointer hover:scale-[1.02] active:scale-95"
+                    >
+                      <Package className="w-6 h-6 text-emerald-500 mb-2 group-hover:scale-110 transition-transform" />
+                      <span className="block font-bold text-slate-800 dark:text-white text-sm">Stock Inward</span>
+                      <span className="block text-slate-500 text-[11px] mt-0.5">Log new bird batch delivery</span>
+                    </button>
+
+                    <button 
+                      onClick={() => setActiveTab('rates')}
+                      className="p-4 rounded-2xl bg-gradient-to-br from-amber-500/10 to-orange-500/10 hover:from-amber-500/15 hover:to-orange-500/15 border border-amber-500/20 text-left transition-all group cursor-pointer hover:scale-[1.02] active:scale-95"
+                    >
+                      <Tag className="w-6 h-6 text-amber-500 mb-2 group-hover:scale-110 transition-transform" />
+                      <span className="block font-bold text-slate-800 dark:text-white text-sm">Daily Rates</span>
+                      <span className="block text-slate-500 text-[11px] mt-0.5">Update live bird prices</span>
+                    </button>
+
+                    <button 
+                      onClick={() => setActiveTab('reports')}
+                      className="p-4 rounded-2xl bg-gradient-to-br from-rose-500/10 to-pink-500/10 hover:from-rose-500/15 hover:to-pink-500/15 border border-rose-500/20 text-left transition-all group cursor-pointer hover:scale-[1.02] active:scale-95"
+                    >
+                      <FileText className="w-6 h-6 text-rose-500 mb-2 group-hover:scale-110 transition-transform" />
+                      <span className="block font-bold text-slate-800 dark:text-white text-sm">View Reports</span>
+                      <span className="block text-slate-500 text-[11px] mt-0.5">Check detailed sales sheets</span>
+                    </button>
+                  </div>
                 </div>
-                <h3 className="text-2xl font-semibold mb-2">Workspace Ready</h3>
-                <p className="text-slate-500 dark:text-slate-400 max-w-md">
-                  Your high-performance PWA has been initialized with React, Vite, Tailwind CSS v4, and offline capabilities.
-                </p>
+
+                <div className="mt-6 pt-6 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-left">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
+                    <span className="text-xs font-bold text-slate-500 dark:text-slate-400">All Systems Operational</span>
+                  </div>
+                  <span className="text-[10px] uppercase font-black text-slate-400 tracking-wider">Momin Chicken POS v1.3</span>
+                </div>
               </div>
 
               {/* Vertical Recent Suppliers List */}
