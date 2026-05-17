@@ -33,9 +33,9 @@ export default function Login({ onLogin }) {
         <div className="relative z-10">
           <div className="text-center mb-10">
             <div className="inline-flex items-center justify-center w-24 h-24 mb-4 transform transition-transform duration-300 hover:scale-105">
-              <img src="/logo.png" alt="Chicken Vypyar Logo" className="w-full h-full object-contain rounded-2xl shadow-2xl shadow-primary-500/20" />
+              <img src="/logo.png" alt="Chicken Vypar Logo" className="w-full h-full object-contain rounded-2xl shadow-2xl shadow-primary-500/20" />
             </div>
-            <h1 className="text-3xl font-bold text-slate-800 dark:text-white">Chicken Vypyar</h1>
+            <h1 className="text-3xl font-bold text-slate-800 dark:text-white">Chicken Vypar</h1>
             <p className="text-slate-500 dark:text-slate-400 mt-2">Select your role and sign in</p>
           </div>
 

@@ -323,7 +323,7 @@ export default function Reports() {
       autoTable(doc, { head: [tableColumn], body: tableRows, startY: 53, theme: 'grid', styles: { fontSize: 9 }, headStyles: { fillColor: [244, 63, 94] }});
     }
 
-    doc.save(`Chicken_Vypyar_${reportType}_${fromDate}.pdf`);
+    doc.save(`Chicken_Vypar_${reportType}_${fromDate}.pdf`);
   };
 
   const exportExcel = () => {
@@ -364,7 +364,7 @@ export default function Reports() {
     const ws = XLSX.utils.aoa_to_sheet(wsData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Report");
-    XLSX.writeFile(wb, `Chicken_Vypyar_${reportType}_${fromDate}.xlsx`);
+    XLSX.writeFile(wb, `Chicken_Vypar_${reportType}_${fromDate}.xlsx`);
   };
 
   return (

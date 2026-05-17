@@ -223,7 +223,7 @@ export default function DailyLogs() {
     ];
 
     autoTable(doc, { head: [tableColumn], body: tableRows, startY: 53, theme: 'grid', styles: { fontSize: 10 }, headStyles: { fillColor: [220, 38, 38] }});
-    doc.save(`Chicken_Vypyar_DaySummary_${logDate}.pdf`);
+    doc.save(`Chicken_Vypar_DaySummary_${logDate}.pdf`);
   };
 
   const exportExcel = () => {
@@ -247,7 +247,7 @@ export default function DailyLogs() {
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(wsData);
     XLSX.utils.book_append_sheet(wb, ws, "Day Summary");
-    XLSX.writeFile(wb, `Chicken_Vypyar_DaySummary_${logDate}.xlsx`);
+    XLSX.writeFile(wb, `Chicken_Vypar_DaySummary_${logDate}.xlsx`);
   };
 
   const handlePrint = () => {

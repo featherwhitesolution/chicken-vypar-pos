@@ -232,7 +232,7 @@ function App() {
           </div>
           <h2 className="text-2xl font-black text-white tracking-tight">Portal Suspended</h2>
           <p className="text-slate-400 mt-3 text-sm leading-relaxed">
-            Your Chicken Vypyar store profile has been <span className="text-red-400 font-bold">suspended or deactivated</span>. All portal activity is currently disabled.
+            Your Chicken Vypar store profile has been <span className="text-red-400 font-bold">suspended or deactivated</span>. All portal activity is currently disabled.
           </p>
           <div className="mt-8 p-4 bg-slate-950/50 rounded-2xl border border-slate-800 text-xs font-mono text-slate-500 text-left space-y-1">
             <div>Customer ID: {shopStatus.customerUniqueId}</div>
@@ -260,7 +260,7 @@ function App() {
           </div>
           <h2 className="text-2xl font-black text-white tracking-tight">Trial Period Expired</h2>
           <p className="text-slate-400 mt-3 text-sm leading-relaxed">
-            Your 30-day free trial period for Chicken Vypyar is <span className="text-amber-400 font-bold">over</span>. Please subscribe to get started and unlock your shop dashboard.
+            Your 30-day free trial period for Chicken Vypar is <span className="text-amber-400 font-bold">over</span>. Please subscribe to get started and unlock your shop dashboard.
           </p>
           <div className="mt-8 p-4 bg-slate-950/50 rounded-2xl border border-slate-800 text-xs font-mono text-slate-500 text-left space-y-1">
             <div>Customer ID: {shopStatus.customerUniqueId}</div>
@@ -291,7 +291,7 @@ function App() {
           <div className="w-8 h-8 rounded-full overflow-hidden shadow-md shrink-0">
             <img src="/logo.png" alt="Logo" className="w-full h-full object-cover bg-white" />
           </div>
-          <h1 className="text-lg font-bold tracking-tight text-gradient">Chicken Vypyar</h1>
+          <h1 className="text-lg font-bold tracking-tight text-gradient">Chicken Vypar</h1>
         </div>
         <button onClick={toggleMobileMenu} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-lg text-slate-600 dark:text-slate-300">
           {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
@@ -313,7 +313,7 @@ function App() {
           <div className="w-10 h-10 rounded-full overflow-hidden shadow-lg shadow-primary-500/30 shrink-0 border-2 border-white/50">
             <img src="/logo.png" alt="Logo" className="w-full h-full object-cover bg-white" />
           </div>
-          <h1 className="text-xl font-bold tracking-tight text-gradient">Chicken Vypyar</h1>
+          <h1 className="text-xl font-bold tracking-tight text-gradient">Chicken Vypar</h1>
 
           <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden ml-auto p-1 bg-slate-100 dark:bg-slate-800 rounded-md">
             <X className="w-5 h-5 text-slate-500" />
