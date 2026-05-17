@@ -4,13 +4,13 @@ import { Store, Tractor, Building2, User, Lock, ArrowRight, Shield } from 'lucid
 export default function Login({ onLogin }) {
   const [role, setRole] = useState('Retailer');
   const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('1123456');
+  const [password, setPassword] = useState('123456');
   
   const handleLogin = (e) => {
     e.preventDefault();
     if (username === 'admin_farhan' && password === 'Farhans@27') {
       onLogin({ username, role: 'developer_admin' });
-    } else if (username === 'admin' && password === '1123456') {
+    } else if (username === 'admin' && password === '123456') {
       onLogin({ username, role });
     } else {
       alert("Invalid username or password. Please try again.");
