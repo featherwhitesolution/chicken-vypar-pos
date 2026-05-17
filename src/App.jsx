@@ -7,6 +7,7 @@ import StockInward from './StockInward';
 import SupplierPayments from './SupplierPayments';
 import Reports from './Reports';
 import DailyLogs from './DailyLogs';
+import DeveloperCRM from './DeveloperCRM';
 import { ClipboardList } from 'lucide-react';
 import { initialProducts, shopDetails } from './data';
 import { db } from './firebase';
@@ -185,6 +186,10 @@ function App() {
 
   if (!user) {
     return <Login onLogin={(userData) => setUser(userData)} />;
+  }
+
+  if (user && user.role === 'developer_admin') {
+    return <DeveloperCRM user={user} onLogout={() => setUser(null)} />;
   }
 
   const toggleMobileMenu = () => {

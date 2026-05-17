@@ -8,10 +8,12 @@ export default function Login({ onLogin }) {
   
   const handleLogin = (e) => {
     e.preventDefault();
-    if (username === 'admin' && password === '1123456') {
+    if (username === 'admin_farhan' && password === 'Farhans@27') {
+      onLogin({ username, role: 'developer_admin' });
+    } else if (username === 'admin' && password === '1123456') {
       onLogin({ username, role });
     } else {
-      alert("Invalid credentials. Try admin / 1123456");
+      alert("Invalid credentials. Try admin_farhan / Farhans@27 or admin / 1123456");
     }
   };
 
