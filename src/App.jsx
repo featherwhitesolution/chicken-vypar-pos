@@ -459,7 +459,7 @@ function SettingsPanel() {
     const saved = localStorage.getItem('shopInfo');
     if (saved) return JSON.parse(saved);
     return {
-      customerUniqueId: 'MC-89324',
+      customerUniqueId: 'CV-00001',
       shopName: shopDetails.name,
       proprietorName: 'Mohammad Farooq Momin',
       address: shopDetails.address,

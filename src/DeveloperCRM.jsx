@@ -10,39 +10,52 @@ export default function DeveloperCRM({ user, onLogout }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [shops, setShops] = useState(() => {
     const saved = localStorage.getItem('crm_shops');
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed.length > 0 && parsed[0].customerUniqueId && parsed[0].customerUniqueId.startsWith('MC-')) {
+        localStorage.removeItem('crm_shops');
+      } else {
+        return parsed;
+      }
+    }
     return [
       {
-        customerUniqueId: 'MC-89324',
+        customerUniqueId: 'CV-00001',
         shopName: 'Momin Chicken',
         proprietorName: 'Mohammad Farooq Momin',
         address: '123, Main Bazar road, Pune, Maharashtra',
         phone: '+91 98765 43210',
         gstin: '27AAAAA1111A1Z1',
+        aadharNo: '1234 5678 9012',
+        panNo: 'ABCDE1234F',
         status: 'Active',
         kycStatus: 'Verified',
         maxWorkers: 5,
         registeredAt: '2026-05-15'
       },
       {
-        customerUniqueId: 'MC-90211',
+        customerUniqueId: 'CV-00002',
         shopName: 'Al-Habib Poultry Farm',
         proprietorName: 'Habibullah Khan',
         address: 'Gate 4, Agri Market yard, Satara, Maharashtra',
         phone: '+91 88888 77777',
         gstin: '27BBBBB2222B2Z2',
+        aadharNo: '9876 5432 1098',
+        panNo: 'FGHIJ5678K',
         status: 'Trial',
         kycStatus: 'Verified',
         maxWorkers: 10,
         registeredAt: '2026-05-16'
       },
       {
-        customerUniqueId: 'MC-71192',
+        customerUniqueId: 'CV-00003',
         shopName: 'Star Chicken Retailer',
         proprietorName: 'Salim Qureshi',
         address: 'Shop 12, Fish Market complex, Solapur, Maharashtra',
         phone: '+91 99999 88888',
         gstin: '27CCCCC3333C3Z3',
+        aadharNo: '5555 6666 7777',
+        panNo: 'LMNOP9012Q',
         status: 'Suspended',
         kycStatus: 'Pending',
         maxWorkers: 3,
@@ -59,6 +72,8 @@ export default function DeveloperCRM({ user, onLogout }) {
     address: '',
     phone: '',
     gstin: '',
+    aadharNo: '',
+    panNo: '',
     status: 'Active',
     kycStatus: 'Verified',
     maxWorkers: 5
@@ -73,10 +88,28 @@ export default function DeveloperCRM({ user, onLogout }) {
 
   const handleCreateShop = (e) => {
     e.preventDefault();
-    const randomId = `MC-${Math.floor(10000 + Math.random() * 90000)}`;
+    
+    // Auto-generate sequential CV-00001 ID
+    let nextNum = 1;
+    if (shops.length > 0) {
+      const cvIds = shops
+        .map(s => s.customerUniqueId)
+        .filter(id => id && id.startsWith('CV-'));
+      
+      if (cvIds.length > 0) {
+        const numbers = cvIds.map(id => {
+          const part = id.split('-')[1];
+          return parseInt(part, 10) || 0;
+        });
+        const maxNum = Math.max(...numbers);
+        nextNum = maxNum + 1;
+      }
+    }
+    const sequentialId = `CV-${String(nextNum).padStart(5, '0')}`;
+
     const shopToSave = {
       ...newShop,
-      customerUniqueId: randomId,
+      customerUniqueId: sequentialId,
       registeredAt: new Date().toISOString().split('T')[0]
     };
     setShops([...shops, shopToSave]);
@@ -87,6 +120,8 @@ export default function DeveloperCRM({ user, onLogout }) {
       address: '',
       phone: '',
       gstin: '',
+      aadharNo: '',
+      panNo: '',
       status: 'Active',
       kycStatus: 'Verified',
       maxWorkers: 5
@@ -317,7 +352,7 @@ export default function DeveloperCRM({ user, onLogout }) {
                     <tr className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-100 dark:border-slate-800/80">
                       <th className="p-4 text-xs font-black uppercase text-slate-400 tracking-wider">Client Profile</th>
                       <th className="p-4 text-xs font-black uppercase text-slate-400 tracking-wider">Proprietor / Contact</th>
-                      <th className="p-4 text-xs font-black uppercase text-slate-400 tracking-wider">GSTIN</th>
+                      <th className="p-4 text-xs font-black uppercase text-slate-400 tracking-wider">Tax & KYC Identifiers</th>
                       <th className="p-4 text-xs font-black uppercase text-slate-400 tracking-wider text-center">Workers</th>
                       <th className="p-4 text-xs font-black uppercase text-slate-400 tracking-wider">KYC Status</th>
                       <th className="p-4 text-xs font-black uppercase text-slate-400 tracking-wider">License Status</th>
@@ -344,7 +379,22 @@ export default function DeveloperCRM({ user, onLogout }) {
                             <span className="block text-slate-400 text-xs font-normal mt-0.5">{shop.phone}</span>
                           </div>
                         </td>
-                        <td className="p-4 font-mono text-xs font-bold text-slate-500 uppercase">{shop.gstin}</td>
+                        <td className="p-4 text-xs">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1.5 text-slate-500 font-mono">
+                              <span className="bg-slate-100 dark:bg-slate-800 text-[9px] font-bold px-1 rounded uppercase tracking-wider shrink-0 text-slate-400">GST</span>
+                              <span className="font-bold">{shop.gstin || 'N/A'}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-slate-500 font-mono">
+                              <span className="bg-slate-100 dark:bg-slate-800 text-[9px] font-bold px-1 rounded uppercase tracking-wider shrink-0 text-slate-400">AADHAR</span>
+                              <span>{shop.aadharNo || 'N/A'}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-slate-500 font-mono">
+                              <span className="bg-slate-100 dark:bg-slate-800 text-[9px] font-bold px-1 rounded uppercase tracking-wider shrink-0 text-slate-400">PAN</span>
+                              <span className="uppercase">{shop.panNo || 'N/A'}</span>
+                            </div>
+                          </div>
+                        </td>
                         <td className="p-4 text-center font-bold text-slate-600 dark:text-slate-300">{shop.maxWorkers} Profiles</td>
                         <td className="p-4">
                           <select 
@@ -547,6 +597,31 @@ export default function DeveloperCRM({ user, onLogout }) {
                     onChange={(e) => setNewShop({ ...newShop, gstin: e.target.value })}
                     className="w-full p-2.5 border border-slate-250 dark:border-slate-750 rounded-xl bg-white/70 dark:bg-slate-800/80 text-sm outline-none uppercase"
                     placeholder="e.g. 27AAAAA1111A1Z1"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Aadhar Number</label>
+                  <input
+                    type="text"
+                    required
+                    value={newShop.aadharNo}
+                    onChange={(e) => setNewShop({ ...newShop, aadharNo: e.target.value })}
+                    className="w-full p-2.5 border border-slate-250 dark:border-slate-750 rounded-xl bg-white/70 dark:bg-slate-800/80 text-sm outline-none"
+                    placeholder="e.g. 1234 5678 9012"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">PAN Number</label>
+                  <input
+                    type="text"
+                    required
+                    value={newShop.panNo}
+                    onChange={(e) => setNewShop({ ...newShop, panNo: e.target.value })}
+                    className="w-full p-2.5 border border-slate-250 dark:border-slate-750 rounded-xl bg-white/70 dark:bg-slate-800/80 text-sm outline-none uppercase"
+                    placeholder="e.g. ABCDE1234F"
                   />
                 </div>
               </div>
