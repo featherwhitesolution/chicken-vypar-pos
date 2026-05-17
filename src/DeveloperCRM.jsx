@@ -423,7 +423,7 @@ export default function DeveloperCRM({ user, onLogout }) {
                             }`}
                           >
                             <option value="Active">Active</option>
-                            <option value="Trial">Trial Mode</option>
+                            <option value="Trial">Trial Mode (30 Days)</option>
                             <option value="Suspended">Suspended</option>
                           </select>
                         </td>
@@ -647,7 +647,7 @@ export default function DeveloperCRM({ user, onLogout }) {
                     className="w-full p-2.5 border border-slate-250 dark:border-slate-750 rounded-xl bg-white/70 dark:bg-slate-800/80 text-sm outline-none"
                   >
                     <option value="Active">Active</option>
-                    <option value="Trial">Trial Mode</option>
+                    <option value="Trial">Trial Mode (30 Days)</option>
                     <option value="Suspended">Suspended</option>
                   </select>
                 </div>

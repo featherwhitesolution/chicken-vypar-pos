@@ -28,7 +28,7 @@ function App() {
     const saved = localStorage.getItem('shopInfo');
     if (saved) return JSON.parse(saved);
     return {
-      customerUniqueId: 'MC-89324',
+      customerUniqueId: 'CV-00001',
       shopName: shopDetails.name,
       proprietorName: 'Mohammad Farooq Momin',
       address: shopDetails.address,
@@ -36,6 +36,37 @@ function App() {
       gstin: shopDetails.gstin || '27AAAAA1111A1Z1'
     };
   });
+
+  const [shopStatus, setShopStatus] = useState(() => {
+    const savedInfo = localStorage.getItem('shopInfo');
+    const shopId = savedInfo ? JSON.parse(savedInfo).customerUniqueId : 'CV-00001';
+    const savedShops = localStorage.getItem('crm_shops');
+    if (savedShops) {
+      const shopsList = JSON.parse(savedShops);
+      const activeShop = shopsList.find(s => s.customerUniqueId === shopId);
+      if (activeShop) return activeShop;
+    }
+    return {
+      customerUniqueId: 'CV-00001',
+      status: 'Active',
+      kycStatus: 'Verified',
+      registeredAt: '2026-05-15'
+    };
+  });
+
+  const getTrialDetails = () => {
+    if (!shopStatus || shopStatus.status !== 'Trial') return null;
+    const regDate = new Date(shopStatus.registeredAt || '2026-05-15');
+    const today = new Date();
+    const elapsedMs = today - regDate;
+    const elapsedDays = Math.floor(elapsedMs / (1000 * 60 * 60 * 24));
+    const remainingDays = Math.max(0, 30 - elapsedDays);
+    const isExpired = remainingDays <= 0;
+    return { remainingDays, isExpired };
+  };
+
+  const trialDetails = getTrialDetails();
+  const isSuspended = shopStatus && shopStatus.status === 'Suspended';
 
   const [dashboardStats, setDashboardStats] = useState({
     stockAvailable: '0.00',
@@ -192,6 +223,62 @@ function App() {
     return <DeveloperCRM user={user} onLogout={() => setUser(null)} />;
   }
 
+  if (user && user.role !== 'developer_admin' && isSuspended) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-slate-900/80 backdrop-blur-md rounded-3xl p-8 border border-red-500/20 text-center shadow-2xl animate-in zoom-in-95 duration-300">
+          <div className="h-16 w-16 bg-red-500/10 text-red-550 rounded-2xl flex items-center justify-center mx-auto mb-6 border border-red-500/20 shadow-lg shadow-red-500/10">
+            <Lock className="w-8 h-8 text-red-500" />
+          </div>
+          <h2 className="text-2xl font-black text-white tracking-tight">Portal Suspended</h2>
+          <p className="text-slate-400 mt-3 text-sm leading-relaxed">
+            Your Chicken Vypyar store profile has been <span className="text-red-400 font-bold">suspended or deactivated</span>. All portal activity is currently disabled.
+          </p>
+          <div className="mt-8 p-4 bg-slate-950/50 rounded-2xl border border-slate-800 text-xs font-mono text-slate-500 text-left space-y-1">
+            <div>Customer ID: {shopStatus.customerUniqueId}</div>
+            <div>Store Name: {shopInfo.shopName}</div>
+          </div>
+          <div className="mt-8 flex flex-col gap-3">
+            <a href="mailto:support@featherwhitesolution.com" className="w-full py-3.5 bg-gradient-to-r from-red-650 to-rose-650 hover:from-red-700 hover:to-rose-705 text-white font-bold text-center rounded-2xl shadow-lg shadow-red-500/10 transition-all text-sm block">
+              Contact Admin Support
+            </a>
+            <button onClick={() => setUser(null)} className="w-full py-3 bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold rounded-2xl transition-all text-xs cursor-pointer">
+              Exit to Login
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (user && user.role !== 'developer_admin' && trialDetails && trialDetails.isExpired) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-slate-900/80 backdrop-blur-md rounded-3xl p-8 border border-amber-500/20 text-center shadow-2xl animate-in zoom-in-95 duration-300">
+          <div className="h-16 w-16 bg-amber-500/10 text-amber-500 rounded-2xl flex items-center justify-center mx-auto mb-6 border border-amber-500/20 shadow-lg shadow-amber-500/10">
+            <Lock className="w-8 h-8" />
+          </div>
+          <h2 className="text-2xl font-black text-white tracking-tight">Trial Period Expired</h2>
+          <p className="text-slate-400 mt-3 text-sm leading-relaxed">
+            Your 30-day free trial period for Chicken Vypyar is <span className="text-amber-400 font-bold">over</span>. Please subscribe to get started and unlock your shop dashboard.
+          </p>
+          <div className="mt-8 p-4 bg-slate-950/50 rounded-2xl border border-slate-800 text-xs font-mono text-slate-500 text-left space-y-1">
+            <div>Customer ID: {shopStatus.customerUniqueId}</div>
+            <div>Registered On: {shopStatus.registeredAt}</div>
+          </div>
+          <div className="mt-8 flex flex-col gap-3">
+            <a href="https://chickenvypar.netlify.app/subscribe" className="w-full py-3.5 bg-gradient-to-r from-amber-550 to-orange-650 hover:from-amber-600 hover:to-orange-700 text-white text-center font-bold rounded-2xl shadow-lg shadow-amber-500/10 transition-all text-sm block">
+              Subscribe to Get Started
+            </a>
+            <button onClick={() => setUser(null)} className="w-full py-3 bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold rounded-2xl transition-all text-xs cursor-pointer">
+              Exit to Login
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const toggleMobileMenu = () => {
     setIsMobileMenuOpen(!isMobileMenuOpen);
   };
@@ -251,6 +338,23 @@ function App() {
 
       {/* Main Content */}
       <main className="md:ml-64 p-4 md:p-8 print:m-0 print:p-0">
+        {trialDetails && !trialDetails.isExpired && (
+          <div className="mb-6 p-4 bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/20 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 print:hidden animate-pulse">
+            <div className="flex items-center gap-3 text-left">
+              <div className="h-9 w-9 bg-amber-500/10 text-amber-650 dark:text-amber-400 rounded-xl flex items-center justify-center font-bold text-sm shrink-0">
+                ⚡
+              </div>
+              <div>
+                <span className="block text-sm font-extrabold text-slate-800 dark:text-white">Active Trial Period (30 Days)</span>
+                <span className="block text-xs text-slate-500 dark:text-slate-400 mt-0.5">Your trial is active. You have <strong className="text-amber-600 dark:text-amber-400">{trialDetails.remainingDays} days remaining</strong> out of your 30-day free trial.</span>
+              </div>
+            </div>
+            <a href="https://chickenvypar.netlify.app/subscribe" className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white text-xs font-bold rounded-xl shadow-md shrink-0 transition-all transform hover:scale-105 active:scale-95 text-center self-start sm:self-auto block">
+              Subscribe to Reactivate
+            </a>
+          </div>
+        )}
+
         <header className="flex flex-col md:flex-row md:justify-between md:items-center mb-8 gap-4 print:hidden">
           <div>
             <h2 className="text-2xl md:text-3xl font-bold tracking-tight">Welcome back, {shopInfo.shopName}</h2>
