@@ -11,8 +11,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
       manifest: {
-        name: 'Chicken Vypyar',
-        short_name: 'Vypyar',
+        name: 'Chicken Vypar',
+        short_name: 'Chicken Vypar',
         description: 'Chicken Shop Management & Billing Application',
         theme_color: '#f43f5e',
         background_color: '#ffffff',
