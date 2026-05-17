@@ -547,30 +547,30 @@ export default function DeveloperCRM({ user, onLogout }) {
               <X className="w-5 h-5 text-slate-500" />
             </button>
 
-            <h3 className="text-xl font-extrabold tracking-tight mb-2">Onboard New Merchant</h3>
-            <p className="text-sm text-slate-400 mb-6">Create a licensed tenant dashboard with a verified Customer ID.</p>
+            <h3 className="text-xl font-extrabold tracking-tight mb-2 text-slate-950 dark:text-white">Onboard New Merchant</h3>
+            <p className="text-sm text-slate-800 dark:text-slate-300 font-semibold mb-6">Create a licensed tenant dashboard with a verified Customer ID.</p>
 
             <form onSubmit={handleCreateShop} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Shop Name</label>
+                  <label className="text-[10px] font-black uppercase text-slate-950 dark:text-slate-200 tracking-wider">Shop Name</label>
                   <input
                     type="text"
                     required
                     value={newShop.shopName}
                     onChange={(e) => setNewShop({ ...newShop, shopName: e.target.value })}
-                    className="w-full p-2.5 border border-slate-250 dark:border-slate-750 rounded-xl bg-white/70 dark:bg-slate-800/80 text-sm outline-none"
+                    className="w-full p-2.5 border border-slate-350 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-sm outline-none text-slate-950 dark:text-white font-bold placeholder-slate-500 dark:placeholder-slate-400"
                     placeholder="e.g. Royal Chicken Centre"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Proprietor Name</label>
+                  <label className="text-[10px] font-black uppercase text-slate-950 dark:text-slate-200 tracking-wider">Proprietor Name</label>
                   <input
                     type="text"
                     required
                     value={newShop.proprietorName}
                     onChange={(e) => setNewShop({ ...newShop, proprietorName: e.target.value })}
-                    className="w-full p-2.5 border border-slate-250 dark:border-slate-750 rounded-xl bg-white/70 dark:bg-slate-800/80 text-sm outline-none"
+                    className="w-full p-2.5 border border-slate-350 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-sm outline-none text-slate-950 dark:text-white font-bold placeholder-slate-500 dark:placeholder-slate-400"
                     placeholder="e.g. Mohammad Ali"
                   />
                 </div>
@@ -578,24 +578,24 @@ export default function DeveloperCRM({ user, onLogout }) {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Contact Number</label>
+                  <label className="text-[10px] font-black uppercase text-slate-950 dark:text-slate-200 tracking-wider">Contact Number</label>
                   <input
                     type="text"
                     required
                     value={newShop.phone}
                     onChange={(e) => setNewShop({ ...newShop, phone: e.target.value })}
-                    className="w-full p-2.5 border border-slate-250 dark:border-slate-750 rounded-xl bg-white/70 dark:bg-slate-800/80 text-sm outline-none"
+                    className="w-full p-2.5 border border-slate-350 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-sm outline-none text-slate-950 dark:text-white font-bold placeholder-slate-500 dark:placeholder-slate-400"
                     placeholder="e.g. +91 98321 00000"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">GSTIN Number</label>
+                  <label className="text-[10px] font-black uppercase text-slate-950 dark:text-slate-200 tracking-wider">GSTIN Number</label>
                   <input
                     type="text"
                     required
                     value={newShop.gstin}
                     onChange={(e) => setNewShop({ ...newShop, gstin: e.target.value })}
-                    className="w-full p-2.5 border border-slate-250 dark:border-slate-750 rounded-xl bg-white/70 dark:bg-slate-800/80 text-sm outline-none uppercase"
+                    className="w-full p-2.5 border border-slate-350 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-sm outline-none uppercase text-slate-950 dark:text-white font-bold placeholder-slate-500 dark:placeholder-slate-400"
                     placeholder="e.g. 27AAAAA1111A1Z1"
                   />
                 </div>
@@ -603,48 +603,48 @@ export default function DeveloperCRM({ user, onLogout }) {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Aadhar Number</label>
+                  <label className="text-[10px] font-black uppercase text-slate-950 dark:text-slate-200 tracking-wider">Aadhar Number</label>
                   <input
                     type="text"
                     required
                     value={newShop.aadharNo}
                     onChange={(e) => setNewShop({ ...newShop, aadharNo: e.target.value })}
-                    className="w-full p-2.5 border border-slate-250 dark:border-slate-750 rounded-xl bg-white/70 dark:bg-slate-800/80 text-sm outline-none"
+                    className="w-full p-2.5 border border-slate-350 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-sm outline-none text-slate-950 dark:text-white font-bold placeholder-slate-500 dark:placeholder-slate-400"
                     placeholder="e.g. 1234 5678 9012"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">PAN Number</label>
+                  <label className="text-[10px] font-black uppercase text-slate-950 dark:text-slate-200 tracking-wider">PAN Number</label>
                   <input
                     type="text"
                     required
                     value={newShop.panNo}
                     onChange={(e) => setNewShop({ ...newShop, panNo: e.target.value })}
-                    className="w-full p-2.5 border border-slate-250 dark:border-slate-750 rounded-xl bg-white/70 dark:bg-slate-800/80 text-sm outline-none uppercase"
+                    className="w-full p-2.5 border border-slate-350 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-sm outline-none uppercase text-slate-950 dark:text-white font-bold placeholder-slate-500 dark:placeholder-slate-400"
                     placeholder="e.g. ABCDE1234F"
                   />
                 </div>
               </div>
 
               <div className="space-y-1">
-                <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Shop Address</label>
+                <label className="text-[10px] font-black uppercase text-slate-950 dark:text-slate-200 tracking-wider">Shop Address</label>
                 <textarea
                   required
                   rows="2"
                   value={newShop.address}
                   onChange={(e) => setNewShop({ ...newShop, address: e.target.value })}
-                  className="w-full p-2.5 border border-slate-250 dark:border-slate-750 rounded-xl bg-white/70 dark:bg-slate-800/80 text-sm outline-none"
+                  className="w-full p-2.5 border border-slate-350 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-sm outline-none text-slate-950 dark:text-white font-bold placeholder-slate-500 dark:placeholder-slate-400"
                   placeholder="Street name, City, State..."
                 />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Initial License Status</label>
+                  <label className="text-[10px] font-black uppercase text-slate-950 dark:text-slate-200 tracking-wider">Initial License Status</label>
                   <select
                     value={newShop.status}
                     onChange={(e) => setNewShop({ ...newShop, status: e.target.value })}
-                    className="w-full p-2.5 border border-slate-250 dark:border-slate-750 rounded-xl bg-white/70 dark:bg-slate-800/80 text-sm outline-none"
+                    className="w-full p-2.5 border border-slate-350 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-sm outline-none text-slate-950 dark:text-white font-bold"
                   >
                     <option value="Active">Active</option>
                     <option value="Trial">Trial Mode (30 Days)</option>
@@ -652,14 +652,14 @@ export default function DeveloperCRM({ user, onLogout }) {
                   </select>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Max Workers Allowance</label>
+                  <label className="text-[10px] font-black uppercase text-slate-950 dark:text-slate-200 tracking-wider">Max Workers Allowance</label>
                   <input
                     type="number"
                     required
                     min="1"
                     value={newShop.maxWorkers}
                     onChange={(e) => setNewShop({ ...newShop, maxWorkers: parseInt(e.target.value) })}
-                    className="w-full p-2.5 border border-slate-250 dark:border-slate-750 rounded-xl bg-white/70 dark:bg-slate-800/80 text-sm outline-none font-bold"
+                    className="w-full p-2.5 border border-slate-350 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-sm outline-none text-slate-950 dark:text-white font-black"
                   />
                 </div>
               </div>

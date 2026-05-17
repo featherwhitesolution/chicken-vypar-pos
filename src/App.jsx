@@ -626,8 +626,8 @@ function SettingsPanel() {
                 <Hash className="w-5 h-5" />
               </div>
               <div>
-                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Customer Unique ID</span>
-                <span className="block font-mono text-sm font-black text-slate-850 dark:text-white mt-0.5">{shopInfo.customerUniqueId}</span>
+                <span className="text-[10px] uppercase font-black text-slate-900 dark:text-slate-200 tracking-wider">Customer Unique ID</span>
+                <span className="block font-mono text-sm font-black text-slate-950 dark:text-white mt-0.5">{shopInfo.customerUniqueId}</span>
               </div>
             </div>
             <span className="text-[10px] text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 px-2.5 py-1 rounded-full font-bold uppercase tracking-wider border border-blue-100 dark:border-blue-900">Verified Client</span>
@@ -637,8 +637,8 @@ function SettingsPanel() {
             
             {/* Shop Name */}
             <div className="space-y-2">
-              <label className="text-xs font-black uppercase text-slate-400 tracking-wider flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
+              <label className="text-xs font-black uppercase text-slate-900 dark:text-slate-200 tracking-wider flex items-center justify-between">
+                <span className="flex items-center gap-1.5 font-black">
                   <Store className="w-4 h-4 text-blue-500" />
                   Shop Name
                 </span>
@@ -650,14 +650,14 @@ function SettingsPanel() {
                 type="text"
                 value={shopInfo.shopName}
                 readOnly
-                className="w-full p-3 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-750 rounded-xl outline-none font-semibold text-slate-500 dark:text-slate-400 cursor-not-allowed"
+                className="w-full p-3 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-750 rounded-xl outline-none font-bold text-slate-950 dark:text-white cursor-not-allowed"
               />
             </div>
 
             {/* Proprietor Name */}
             <div className="space-y-2">
-              <label className="text-xs font-black uppercase text-slate-400 tracking-wider flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
+              <label className="text-xs font-black uppercase text-slate-900 dark:text-slate-200 tracking-wider flex items-center justify-between">
+                <span className="flex items-center gap-1.5 font-black">
                   <User className="w-4 h-4 text-indigo-500" />
                   Proprietor Name
                 </span>
@@ -669,19 +669,19 @@ function SettingsPanel() {
                 type="text"
                 value={shopInfo.proprietorName}
                 readOnly
-                className="w-full p-3 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-750 rounded-xl outline-none font-semibold text-slate-500 dark:text-slate-400 cursor-not-allowed"
+                className="w-full p-3 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-750 rounded-xl outline-none font-bold text-slate-950 dark:text-white cursor-not-allowed"
               />
             </div>
 
             {/* Contact Number */}
             <div className="space-y-2">
-              <label className="text-xs font-black uppercase text-slate-400 tracking-wider flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
+              <label className="text-xs font-black uppercase text-slate-900 dark:text-slate-200 tracking-wider flex items-center justify-between">
+                <span className="flex items-center gap-1.5 font-black">
                   <Phone className="w-4 h-4 text-emerald-500" />
                   Contact Number
                 </span>
                 {!isEditing && (
-                  <span className="text-[9px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">ReadOnly</span>
+                  <span className="text-[9px] text-slate-900 dark:text-slate-300 font-bold uppercase tracking-wider">ReadOnly</span>
                 )}
               </label>
               <input
@@ -690,18 +690,18 @@ function SettingsPanel() {
                 onChange={(e) => setShopInfo({ ...shopInfo, phone: e.target.value })}
                 required
                 readOnly={!isEditing}
-                className={`w-full p-3 border rounded-xl outline-none font-semibold transition-all ${
+                className={`w-full p-3 border rounded-xl outline-none font-bold transition-all ${
                   isEditing 
-                    ? 'bg-slate-50 dark:bg-slate-800 border-emerald-500/30 text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500' 
-                    : 'bg-slate-100/50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 cursor-not-allowed'
+                    ? 'bg-slate-50 dark:bg-slate-800 border-emerald-500/30 text-slate-950 dark:text-white focus:ring-2 focus:ring-emerald-500' 
+                    : 'bg-slate-100/50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 text-slate-950 dark:text-white cursor-not-allowed'
                 }`}
               />
             </div>
 
             {/* GSTIN */}
             <div className="space-y-2">
-              <label className="text-xs font-black uppercase text-slate-400 tracking-wider flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
+              <label className="text-xs font-black uppercase text-slate-900 dark:text-slate-200 tracking-wider flex items-center justify-between">
+                <span className="flex items-center gap-1.5 font-black">
                   <Hash className="w-4 h-4 text-rose-500" />
                   GSTIN Number
                 </span>
@@ -713,7 +713,7 @@ function SettingsPanel() {
                 type="text"
                 value={shopInfo.gstin}
                 readOnly
-                className="w-full p-3 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-750 rounded-xl outline-none font-semibold text-slate-500 dark:text-slate-400 cursor-not-allowed uppercase"
+                className="w-full p-3 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-750 rounded-xl outline-none font-bold text-slate-950 dark:text-white cursor-not-allowed uppercase"
               />
             </div>
 
@@ -721,13 +721,13 @@ function SettingsPanel() {
 
           {/* Address */}
           <div className="space-y-2">
-            <label className="text-xs font-black uppercase text-slate-400 tracking-wider flex items-center justify-between">
-              <span className="flex items-center gap-1.5">
+            <label className="text-xs font-black uppercase text-slate-900 dark:text-slate-200 tracking-wider flex items-center justify-between">
+              <span className="flex items-center gap-1.5 font-black">
                 <MapPin className="w-4 h-4 text-amber-500" />
                 Shop Address
               </span>
               {!isEditing && (
-                <span className="text-[9px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">ReadOnly</span>
+                <span className="text-[9px] text-slate-900 dark:text-slate-300 font-bold uppercase tracking-wider">ReadOnly</span>
               )}
             </label>
             <textarea
@@ -736,10 +736,10 @@ function SettingsPanel() {
               required
               rows="3"
               readOnly={!isEditing}
-              className={`w-full p-3 border rounded-xl outline-none font-semibold transition-all ${
+              className={`w-full p-3 border rounded-xl outline-none font-bold transition-all ${
                 isEditing 
-                  ? 'bg-slate-50 dark:bg-slate-800 border-amber-500/30 text-slate-800 dark:text-white focus:ring-2 focus:ring-amber-500' 
-                  : 'bg-slate-100/50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 cursor-not-allowed'
+                  ? 'bg-slate-50 dark:bg-slate-800 border-amber-500/30 text-slate-950 dark:text-white focus:ring-2 focus:ring-amber-500' 
+                  : 'bg-slate-100/50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 text-slate-950 dark:text-white cursor-not-allowed'
               }`}
             />
           </div>
