@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   Shield, Users, Database, LogOut, Menu, X, Plus, 
   Check, Lock, Edit2, Sparkles, AlertTriangle, Download, 
-  Upload, Trash2, Power, Landmark, Phone, MapPin, Hash, ShieldAlert
+  Upload, Trash2, Power, Landmark, Phone, MapPin, Hash, ShieldAlert,
+  CreditCard, Smartphone, Globe, RefreshCw, AlertCircle, IndianRupee
 } from 'lucide-react';
 
 export default function DeveloperCRM({ user, onLogout }) {
@@ -11,11 +12,28 @@ export default function DeveloperCRM({ user, onLogout }) {
   const [shops, setShops] = useState(() => {
     const saved = localStorage.getItem('crm_shops');
     if (saved) {
-      const parsed = JSON.parse(saved);
-      if (parsed.length > 0 && parsed[0].customerUniqueId && parsed[0].customerUniqueId.startsWith('MC-')) {
-        localStorage.removeItem('crm_shops');
-      } else {
-        return parsed;
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.length > 0 && parsed[0].customerUniqueId && parsed[0].customerUniqueId.startsWith('MC-')) {
+          localStorage.removeItem('crm_shops');
+        } else {
+          return parsed.map(shop => {
+            let status = shop.status;
+            if (shop.customerUniqueId === 'CV-00001') {
+              status = 'Active';
+            }
+            return {
+              ...shop,
+              status,
+              registeredAt: shop.registeredAt || new Date().toISOString().split('T')[0],
+              subscriptionStartedAt: shop.subscriptionStartedAt || (status === 'Active' ? shop.registeredAt || new Date().toISOString().split('T')[0] : ''),
+              deactivatedAt: status === 'Deactive' ? (shop.deactivatedAt || new Date().toISOString().split('T')[0]) : '',
+              subscriptionPlan: shop.subscriptionPlan || 'Monthly'
+            };
+          });
+        }
+      } catch (err) {
+        console.error("Error parsing crm_shops:", err);
       }
     }
     return [
@@ -31,7 +49,10 @@ export default function DeveloperCRM({ user, onLogout }) {
         status: 'Active',
         kycStatus: 'Verified',
         maxWorkers: 5,
-        registeredAt: '2026-05-15'
+        registeredAt: '2026-05-15',
+        subscriptionStartedAt: '2026-05-15',
+        deactivatedAt: '',
+        subscriptionPlan: 'Monthly'
       },
       {
         customerUniqueId: 'CV-00002',
@@ -45,7 +66,10 @@ export default function DeveloperCRM({ user, onLogout }) {
         status: 'Trial',
         kycStatus: 'Verified',
         maxWorkers: 10,
-        registeredAt: '2026-05-16'
+        registeredAt: '2026-05-16',
+        subscriptionStartedAt: '',
+        deactivatedAt: '',
+        subscriptionPlan: 'Monthly'
       },
       {
         customerUniqueId: 'CV-00003',
@@ -56,10 +80,13 @@ export default function DeveloperCRM({ user, onLogout }) {
         gstin: '27CCCCC3333C3Z3',
         aadharNo: '5555 6666 7777',
         panNo: 'LMNOP9012Q',
-        status: 'Suspended',
+        status: 'Deactive',
         kycStatus: 'Pending',
         maxWorkers: 3,
-        registeredAt: '2026-05-17'
+        registeredAt: '2026-05-17',
+        subscriptionStartedAt: '2026-05-17',
+        deactivatedAt: '2026-05-18',
+        subscriptionPlan: 'Yearly'
       }
     ];
   });
@@ -76,11 +103,119 @@ export default function DeveloperCRM({ user, onLogout }) {
     panNo: '',
     status: 'Active',
     kycStatus: 'Verified',
-    maxWorkers: 5
+    maxWorkers: 5,
+    registeredAt: new Date().toISOString().split('T')[0],
+    subscriptionStartedAt: '',
+    deactivatedAt: '',
+    subscriptionPlan: 'Monthly'
   });
 
   const [backupSuccess, setBackupSuccess] = useState(false);
   const [restoreSuccess, setRestoreSuccess] = useState(null);
+
+  // Razorpay admin payment simulation states
+  const [payingShop, setPayingShop] = useState(null);
+  const [showRazorpay, setShowRazorpay] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState('Monthly');
+  const [paymentStep, setPaymentStep] = useState('plan'); // 'plan', 'method', 'processing', 'success'
+  const [selectedMethod, setSelectedMethod] = useState(''); // 'upi', 'card', 'netbanking'
+  const [upiId, setUpiId] = useState('');
+  const [cardNumber, setCardNumber] = useState('');
+  const [cardExpiry, setCardExpiry] = useState('');
+  const [cardCvv, setCardCvv] = useState('');
+  const [paymentError, setPaymentError] = useState('');
+
+  const plans = [
+    { id: 'Monthly', name: 'Monthly Plan', price: 500, period: '1 Month' },
+    { id: 'Quarterly', name: 'Quarterly Plan', price: 1500, period: '3 Months' },
+    { id: 'Half-Yearly', name: 'Half-Yearly Plan', price: 3000, period: '6 Months' },
+    { id: 'Yearly', name: 'Yearly Plan', price: 6000, period: '1 Year' }
+  ];
+
+  const loadRazorpayScript = () => {
+    return new Promise((resolve) => {
+      if (window.Razorpay) {
+        resolve(true);
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.async = true;
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
+  const handleCollectPayment = (shop) => {
+    setPayingShop(shop);
+    setSelectedPlan(shop.subscriptionPlan || 'Monthly');
+    setPaymentStep('plan');
+    setSelectedMethod('');
+    setUpiId('');
+    setCardNumber('');
+    setCardExpiry('');
+    setCardCvv('');
+    setPaymentError('');
+    setShowRazorpay(true);
+  };
+
+  const handleProceedToPay = () => {
+    setPaymentError('');
+    setPaymentStep('method');
+  };
+
+  const processSuccessPayment = (planId) => {
+    setShowRazorpay(true);
+    setPaymentStep('processing');
+    setTimeout(() => {
+      setPaymentStep('success');
+      const todayStr = new Date().toISOString().split('T')[0];
+
+      setShops(prevShops => prevShops.map(s => {
+        if (s.customerUniqueId === payingShop.customerUniqueId) {
+          return {
+            ...s,
+            status: 'Active',
+            subscriptionPlan: planId,
+            subscriptionStartedAt: todayStr,
+            deactivatedAt: ''
+          };
+        }
+        return s;
+      }));
+
+      setTimeout(() => {
+        setShowRazorpay(false);
+        setPaymentStep('plan');
+        setPayingShop(null);
+      }, 2500);
+    }, 1500);
+  };
+
+  const handlePaymentSubmit = (e) => {
+    e.preventDefault();
+    if (selectedMethod === 'upi' && !upiId.includes('@')) {
+      setPaymentError('Please enter a valid UPI ID (e.g. user@okhdfcbank)');
+      return;
+    }
+    if (selectedMethod === 'card') {
+      if (cardNumber.replace(/\s/g, '').length < 16) {
+        setPaymentError('Please enter a valid 16-digit card number');
+        return;
+      }
+      if (!cardExpiry.includes('/')) {
+        setPaymentError('Please enter expiry date (MM/YY)');
+        return;
+      }
+      if (cardCvv.length < 3) {
+        setPaymentError('Please enter a 3-digit CVV');
+        return;
+      }
+    }
+    setPaymentError('');
+    processSuccessPayment(selectedPlan);
+  };
 
   useEffect(() => {
     localStorage.setItem('crm_shops', JSON.stringify(shops));
@@ -110,7 +245,10 @@ export default function DeveloperCRM({ user, onLogout }) {
     const shopToSave = {
       ...newShop,
       customerUniqueId: sequentialId,
-      registeredAt: new Date().toISOString().split('T')[0]
+      registeredAt: newShop.registeredAt || new Date().toISOString().split('T')[0],
+      subscriptionStartedAt: newShop.status === 'Active' ? (newShop.subscriptionStartedAt || new Date().toISOString().split('T')[0]) : newShop.subscriptionStartedAt,
+      deactivatedAt: newShop.status === 'Deactive' ? (newShop.deactivatedAt || new Date().toISOString().split('T')[0]) : newShop.deactivatedAt,
+      subscriptionPlan: newShop.subscriptionPlan || 'Monthly'
     };
     setShops([...shops, shopToSave]);
     setShowAddModal(false);
@@ -124,12 +262,34 @@ export default function DeveloperCRM({ user, onLogout }) {
       panNo: '',
       status: 'Active',
       kycStatus: 'Verified',
-      maxWorkers: 5
+      maxWorkers: 5,
+      registeredAt: new Date().toISOString().split('T')[0],
+      subscriptionStartedAt: '',
+      deactivatedAt: '',
+      subscriptionPlan: 'Monthly'
     });
   };
 
   const handleUpdateStatus = (shopId, newStatus) => {
-    setShops(shops.map(s => s.customerUniqueId === shopId ? { ...s, status: newStatus } : s));
+    setShops(shops.map(s => {
+      if (s.customerUniqueId === shopId) {
+        let update = { ...s, status: newStatus };
+        if (newStatus === 'Active') {
+          update.subscriptionStartedAt = s.subscriptionStartedAt || new Date().toISOString().split('T')[0];
+          update.deactivatedAt = '';
+        } else if (newStatus === 'Deactive') {
+          update.deactivatedAt = s.deactivatedAt || new Date().toISOString().split('T')[0];
+        } else {
+          update.deactivatedAt = '';
+        }
+        return update;
+      }
+      return s;
+    }));
+  };
+
+  const handleUpdatePlan = (shopId, newPlan) => {
+    setShops(shops.map(s => s.customerUniqueId === shopId ? { ...s, subscriptionPlan: newPlan } : s));
   };
 
   const handleUpdateKyc = (shopId, newKyc) => {
@@ -199,10 +359,10 @@ export default function DeveloperCRM({ user, onLogout }) {
       {/* Mobile Top Bar */}
       <div className="md:hidden flex items-center justify-between p-4 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-20">
         <div className="flex items-center gap-3">
-          <div className="h-9 w-9 bg-gradient-to-r from-red-600 to-rose-600 rounded-xl flex items-center justify-center text-white shadow-md">
-            <Shield className="w-5 h-5 animate-pulse" />
+          <div className="w-8 h-8 rounded-full overflow-hidden shadow-md shrink-0">
+            <img src="/logo.png" alt="Logo" className="w-full h-full object-cover bg-white" />
           </div>
-          <h1 className="text-lg font-bold tracking-tight text-gradient">Vypar Dev CRM</h1>
+          <h1 className="text-lg font-bold tracking-tight text-gradient">Chicken Vypar</h1>
         </div>
         <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-lg text-slate-600 dark:text-slate-300">
           {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
@@ -217,11 +377,11 @@ export default function DeveloperCRM({ user, onLogout }) {
       {/* Sidebar */}
       <aside className={`fixed left-0 top-0 h-full w-64 glass-panel border-r border-slate-200 dark:border-slate-800 z-30 flex flex-col transition-transform duration-300 ease-in-out ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
         <div className="p-6 flex items-center gap-3 border-b border-slate-200 dark:border-slate-800">
-          <div className="h-10 w-10 bg-gradient-to-r from-red-600 to-rose-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-red-500/20">
-            <Shield className="w-5 h-5" />
+          <div className="w-10 h-10 rounded-full overflow-hidden shadow-lg shadow-primary-500/30 shrink-0 border-2 border-white/50">
+            <img src="/logo.png" alt="Logo" className="w-full h-full object-cover bg-white" />
           </div>
           <div>
-            <h1 className="text-base font-black tracking-tight text-red-600 dark:text-rose-400 uppercase leading-none">Vypar Dev</h1>
+            <h1 className="text-base font-black tracking-tight text-gradient leading-none">Chicken Vypar</h1>
             <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1 block">SaaS Control</span>
           </div>
           <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden ml-auto p-1 bg-slate-100 dark:bg-slate-800 rounded-md">
@@ -355,6 +515,7 @@ export default function DeveloperCRM({ user, onLogout }) {
                       <th className="p-4 text-xs font-black uppercase text-slate-400 tracking-wider">Tax & KYC Identifiers</th>
                       <th className="p-4 text-xs font-black uppercase text-slate-400 tracking-wider text-center">Workers</th>
                       <th className="p-4 text-xs font-black uppercase text-slate-400 tracking-wider">KYC Status</th>
+                      <th className="p-4 text-xs font-black uppercase text-slate-400 tracking-wider">Sub. Plan</th>
                       <th className="p-4 text-xs font-black uppercase text-slate-400 tracking-wider">License Status</th>
                       <th className="p-4 text-xs font-black uppercase text-slate-400 tracking-wider text-right">Actions</th>
                     </tr>
@@ -370,6 +531,13 @@ export default function DeveloperCRM({ user, onLogout }) {
                             <div>
                               <span className="block font-black text-slate-800 dark:text-white leading-tight">{shop.shopName}</span>
                               <span className="block text-[10px] font-mono text-slate-400 mt-1 uppercase tracking-widest">{shop.customerUniqueId}</span>
+                              <div className="text-[10px] text-slate-500 mt-2 space-y-0.5 border-t border-slate-100 dark:border-slate-800 pt-1.5 font-medium">
+                                <div>📅 Registered: <span className="font-semibold text-slate-700 dark:text-slate-300">{shop.registeredAt || 'N/A'}</span></div>
+                                <div>🚀 Sub Start: <span className="font-semibold text-slate-700 dark:text-slate-300">{shop.subscriptionStartedAt || 'Not Started'}</span></div>
+                                {shop.status === 'Deactive' && shop.deactivatedAt && (
+                                  <div className="text-red-500 font-semibold">🛑 Deactivated: <span>{shop.deactivatedAt}</span></div>
+                                )}
+                              </div>
                             </div>
                           </div>
                         </td>
@@ -412,6 +580,18 @@ export default function DeveloperCRM({ user, onLogout }) {
                         </td>
                         <td className="p-4">
                           <select 
+                            value={shop.subscriptionPlan || 'Monthly'}
+                            onChange={(e) => handleUpdatePlan(shop.customerUniqueId, e.target.value)}
+                            className="text-xs font-bold px-3 py-1.5 rounded-full outline-none border border-slate-200 dark:border-slate-700 bg-slate-50 text-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
+                          >
+                            <option value="Monthly">Monthly</option>
+                            <option value="Quarterly">Quarterly</option>
+                            <option value="Half-Yearly">Half-Yearly</option>
+                            <option value="Yearly">Yearly</option>
+                          </select>
+                        </td>
+                        <td className="p-4">
+                          <select 
                             value={shop.status}
                             onChange={(e) => handleUpdateStatus(shop.customerUniqueId, e.target.value)}
                             className={`text-xs font-bold px-3 py-1.5 rounded-full outline-none border cursor-pointer ${
@@ -424,10 +604,17 @@ export default function DeveloperCRM({ user, onLogout }) {
                           >
                             <option value="Active">Active</option>
                             <option value="Trial">Trial Mode (30 Days)</option>
-                            <option value="Suspended">Suspended</option>
+                            <option value="Deactive">Deactive</option>
                           </select>
                         </td>
-                        <td className="p-4 text-right">
+                        <td className="p-4 text-right flex items-center justify-end gap-1.5">
+                          <button 
+                            onClick={() => handleCollectPayment(shop)}
+                            title="Collect / Process Subscription Payment"
+                            className="p-2 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 rounded-xl transition-all cursor-pointer inline-flex items-center justify-center"
+                          >
+                            <CreditCard className="w-4.5 h-4.5" />
+                          </button>
                           <button 
                             onClick={() => handleDeleteShop(shop.customerUniqueId)}
                             className="p-2 text-rose-600 hover:text-rose-800 hover:bg-rose-50 dark:hover:bg-rose-950/20 rounded-xl transition-all cursor-pointer inline-flex items-center justify-center"
@@ -638,7 +825,39 @@ export default function DeveloperCRM({ user, onLogout }) {
                 />
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-slate-950 dark:text-slate-200 tracking-wider">Registration Date</label>
+                  <input
+                    type="date"
+                    required
+                    value={newShop.registeredAt}
+                    onChange={(e) => setNewShop({ ...newShop, registeredAt: e.target.value })}
+                    className="w-full p-2.5 border border-slate-350 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-sm outline-none text-slate-950 dark:text-white font-bold"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-slate-950 dark:text-slate-200 tracking-wider">Sub. Start Date</label>
+                  <input
+                    type="date"
+                    value={newShop.subscriptionStartedAt}
+                    onChange={(e) => setNewShop({ ...newShop, subscriptionStartedAt: e.target.value })}
+                    className="w-full p-2.5 border border-slate-350 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-sm outline-none text-slate-950 dark:text-white font-bold"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-slate-950 dark:text-slate-200 tracking-wider">Deactivation Date</label>
+                  <input
+                    type="date"
+                    value={newShop.deactivatedAt}
+                    disabled={newShop.status !== 'Deactive'}
+                    onChange={(e) => setNewShop({ ...newShop, deactivatedAt: e.target.value })}
+                    className="w-full p-2.5 border border-slate-350 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-850 text-sm outline-none text-slate-950 dark:text-white font-bold disabled:opacity-50"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="space-y-1">
                   <label className="text-[10px] font-black uppercase text-slate-950 dark:text-slate-200 tracking-wider">Initial License Status</label>
                   <select
@@ -648,7 +867,20 @@ export default function DeveloperCRM({ user, onLogout }) {
                   >
                     <option value="Active">Active</option>
                     <option value="Trial">Trial Mode (30 Days)</option>
-                    <option value="Suspended">Suspended</option>
+                    <option value="Deactive">Deactive</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-slate-950 dark:text-slate-200 tracking-wider">Subscription Plan</label>
+                  <select
+                    value={newShop.subscriptionPlan}
+                    onChange={(e) => setNewShop({ ...newShop, subscriptionPlan: e.target.value })}
+                    className="w-full p-2.5 border border-slate-350 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-sm outline-none text-slate-950 dark:text-white font-bold"
+                  >
+                    <option value="Monthly">Monthly</option>
+                    <option value="Quarterly">Quarterly</option>
+                    <option value="Half-Yearly">Half-Yearly</option>
+                    <option value="Yearly">Yearly</option>
                   </select>
                 </div>
                 <div className="space-y-1">
@@ -680,6 +912,335 @@ export default function DeveloperCRM({ user, onLogout }) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* RAZORPAY GATEWAY MODAL SIMULATOR FOR ADMIN */}
+      {showRazorpay && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4 animate-in fade-in duration-200 text-left">
+          <div className={`w-full max-w-md rounded-2xl overflow-hidden shadow-2xl flex flex-col animate-in zoom-in-95 duration-200 font-sans transition-all duration-500 ${
+            paymentStep === 'success' 
+              ? 'bg-[#19b889] text-white border-transparent' 
+              : paymentStep === 'processing'
+              ? 'bg-[#f8f9fa] text-slate-800 border-transparent min-h-[380px]'
+              : 'bg-[#0b1a30] text-white border border-blue-900/45'
+          }`}>
+            
+            {/* Razorpay Modal Header */}
+            {paymentStep !== 'success' && paymentStep !== 'processing' && (
+              <div className="p-5 border-b border-blue-900/30 bg-[#0d213d] flex items-center justify-between text-left">
+                <div className="flex items-center gap-3">
+                  <div className="h-8 w-8 bg-rose-600 rounded-lg flex items-center justify-center font-black text-white tracking-widest text-sm shadow-md">
+                    CV
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm text-slate-100">Chicken Vypar POS</h4>
+                    <p className="text-[10px] text-rose-400 font-semibold tracking-wide font-mono">Admin Billing Collection</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => { setShowRazorpay(false); setPayingShop(null); }} 
+                  className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            )}
+
+            {/* Content Container */}
+            <div className="p-6 flex-1 overflow-y-auto max-h-[75vh] text-left">
+              {paymentStep === 'plan' && (
+                <div className="space-y-5 animate-in fade-in duration-200">
+                  <div className="text-center">
+                    <span className="text-xs font-bold text-rose-400 tracking-wider uppercase block mb-1">Select Subscription Plan</span>
+                    <h3 className="text-base font-bold text-slate-100 truncate">Collect for: <span className="text-rose-400 font-black">{payingShop?.shopName}</span></h3>
+                  </div>
+
+                  <div className="space-y-3">
+                    {plans.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => setSelectedPlan(p.id)}
+                        className={`w-full p-4 rounded-xl border transition-all flex items-center justify-between text-left cursor-pointer ${
+                          selectedPlan === p.id
+                            ? 'bg-rose-600/10 border-rose-500 shadow-md ring-1 ring-rose-500/20'
+                            : 'bg-[#0f2445] border-blue-900/50 hover:border-rose-700/50 hover:bg-[#122b52]'
+                        }`}
+                      >
+                        <div>
+                          <span className="font-bold text-slate-100 text-sm block">{p.name}</span>
+                          <span className="text-xs text-rose-400 font-semibold mt-0.5 block">Validity: {p.period}</span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-lg font-black text-white block">₹{p.price}</span>
+                          <span className="text-[9px] text-slate-400 block font-semibold">Inclusive of all taxes</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={handleProceedToPay}
+                    className="w-full py-3.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-sm rounded-xl shadow-lg shadow-rose-500/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer mt-4"
+                  >
+                    Proceed to Pay ₹{plans.find(p => p.id === selectedPlan)?.price || 500}
+                  </button>
+                </div>
+              )}
+
+              {paymentStep === 'method' && (
+                <div className="space-y-5 animate-in slide-in-from-bottom duration-200">
+                  <div className="text-center">
+                    <span className="text-xs font-bold text-rose-400 tracking-wider uppercase block mb-1">Payment Method Simulator</span>
+                    <h3 className="text-lg font-bold text-slate-100">Choose a Simulated Method</h3>
+                  </div>
+
+                  <div className="space-y-3">
+                    {/* Method Option: UPI */}
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => { setSelectedMethod('upi'); setPaymentError(''); }}
+                        className={`w-full p-4 rounded-xl border transition-all flex items-center gap-3 cursor-pointer ${
+                          selectedMethod === 'upi'
+                            ? 'bg-rose-600/10 border-rose-500'
+                            : 'bg-[#0f2445] border-blue-900/50 hover:bg-[#122b52]'
+                        }`}
+                      >
+                        <Smartphone className="w-5 h-5 text-rose-400" />
+                        <div className="text-left">
+                          <span className="font-bold text-sm text-slate-100 block">UPI Instant (GPay / PhonePe)</span>
+                          <span className="text-[10px] text-slate-400 block">Pay using simulated UPI ID</span>
+                        </div>
+                      </button>
+                      
+                      {selectedMethod === 'upi' && (
+                        <div className="p-4 bg-[#0d213d] rounded-xl border border-blue-900/40 space-y-2 animate-in slide-in-from-top duration-200">
+                          <input
+                            type="text"
+                            placeholder="Enter UPI ID (e.g. merchant@upi)"
+                            value={upiId}
+                            onChange={(e) => setUpiId(e.target.value)}
+                            className="w-full p-2.5 bg-[#0b1a30] border border-blue-900 rounded-lg text-sm text-white focus:outline-none focus:border-rose-500"
+                          />
+                          <p className="text-[10px] text-slate-400 font-semibold">Use any test UPI ID for demo</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Method Option: Card */}
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => { setSelectedMethod('card'); setPaymentError(''); }}
+                        className={`w-full p-4 rounded-xl border transition-all flex items-center gap-3 cursor-pointer ${
+                          selectedMethod === 'card'
+                            ? 'bg-rose-600/10 border-rose-500'
+                            : 'bg-[#0f2445] border-blue-900/50 hover:bg-[#122b52]'
+                        }`}
+                      >
+                        <CreditCard className="w-5 h-5 text-rose-400" />
+                        <div className="text-left">
+                          <span className="font-bold text-sm text-slate-100 block">Credit / Debit Cards</span>
+                          <span className="text-[10px] text-slate-400 block">Visa, MasterCard, RuPay</span>
+                        </div>
+                      </button>
+                      
+                      {selectedMethod === 'card' && (
+                        <div className="p-4 bg-[#0d213d] rounded-xl border border-blue-900/40 space-y-3 animate-in slide-in-from-top duration-200">
+                          <input
+                            type="text"
+                            maxLength="19"
+                            placeholder="Card Number (e.g. 4111 2222 3333 4444)"
+                            value={cardNumber}
+                            onChange={(e) => setCardNumber(e.target.value.replace(/\s?/g, '').replace(/(\d{4})/g, '$1 ').trim())}
+                            className="w-full p-2.5 bg-[#0b1a30] border border-blue-900 rounded-lg text-sm text-white focus:outline-none focus:border-rose-500 font-mono"
+                          />
+                          <div className="grid grid-cols-2 gap-3">
+                            <input
+                              type="text"
+                              maxLength="5"
+                              placeholder="Expiry (MM/YY)"
+                              value={cardExpiry}
+                              onChange={(e) => setCardExpiry(e.target.value)}
+                              className="w-full p-2.5 bg-[#0b1a30] border border-blue-900 rounded-lg text-sm text-white focus:outline-none focus:border-rose-500 font-mono"
+                            />
+                            <input
+                              type="password"
+                              maxLength="3"
+                              placeholder="CVV"
+                              value={cardCvv}
+                              onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, ''))}
+                              className="w-full p-2.5 bg-[#0b1a30] border border-blue-900 rounded-lg text-sm text-white focus:outline-none focus:border-rose-500 font-mono"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Method Option: Netbanking */}
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => { setSelectedMethod('netbanking'); setPaymentError(''); }}
+                        className={`w-full p-4 rounded-xl border transition-all flex items-center gap-3 cursor-pointer ${
+                          selectedMethod === 'netbanking'
+                            ? 'bg-rose-600/10 border-rose-500'
+                            : 'bg-[#0f2445] border-blue-900/50 hover:bg-[#122b52]'
+                        }`}
+                      >
+                        <Globe className="w-5 h-5 text-rose-400" />
+                        <div className="text-left">
+                          <span className="font-bold text-sm text-slate-100 block">Netbanking</span>
+                          <span className="text-[10px] text-slate-400 block">All major Indian banks supported</span>
+                        </div>
+                      </button>
+                      
+                      {selectedMethod === 'netbanking' && (
+                        <div className="p-3 bg-[#0d213d] rounded-xl border border-blue-900/40 animate-in slide-in-from-top duration-200">
+                          <select className="w-full p-2.5 bg-[#0b1a30] border border-blue-900 rounded-lg text-sm text-white focus:outline-none focus:border-rose-500">
+                            <option value="sbi">State Bank of India</option>
+                            <option value="hdfc">HDFC Bank</option>
+                            <option value="icici">ICICI Bank</option>
+                            <option value="axis">Axis Bank</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {paymentError && (
+                    <div className="flex items-center gap-2 text-rose-400 bg-rose-955/20 p-3 rounded-lg border border-rose-900/30 text-xs font-semibold animate-shake">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span>{paymentError}</span>
+                    </div>
+                  )}
+
+                  {selectedMethod && (
+                    <button
+                      onClick={handlePaymentSubmit}
+                      className="w-full py-3.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-sm rounded-xl shadow-lg shadow-rose-500/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer mt-4"
+                    >
+                      Pay ₹{plans.find(p => p.id === selectedPlan)?.price || 500} Securely
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {paymentStep === 'processing' && (
+                <div className="flex-1 flex flex-col items-center justify-center min-h-[300px] relative animate-in fade-in duration-300">
+                  <div className="relative w-40 h-40 flex items-center justify-center scale-90">
+                    {/* Pulsing blue outer ring */}
+                    <div className="absolute inset-0 rounded-full border-4 border-blue-500/10 scale-110 animate-pulse"></div>
+                    
+                    {/* Rotating Blue Progress Ring */}
+                    <div className="absolute inset-0 rounded-full border-4 border-slate-200/40 border-t-blue-600 animate-spin"></div>
+                    
+                    {/* Glossy 3D Shield SVG */}
+                    <svg className="w-20 h-24 drop-shadow-xl animate-pulse" viewBox="0 0 100 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <defs>
+                        <linearGradient id="shield-grad-glow" x1="10%" y1="10%" x2="90%" y2="90%">
+                          <stop offset="0%" stopColor="#3b82f6" />
+                          <stop offset="50%" stopColor="#1d4ed8" />
+                          <stop offset="100%" stopColor="#1e3a8a" />
+                        </linearGradient>
+                        <filter id="glow-filter" x="-20%" y="-20%" width="140%" height="140%">
+                          <feGaussianBlur stdDeviation="3" result="blur" />
+                          <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                        </filter>
+                      </defs>
+                      <path 
+                        d="M50 15 
+                           C75 15, 85 20, 85 45 
+                           C85 75, 70 95, 50 105 
+                           C30 95, 15 75, 15 45 
+                           C15 20, 25 15, 50 15 Z" 
+                        fill="url(#shield-grad-glow)" 
+                        filter="url(#glow-filter)"
+                      />
+                    </svg>
+                  </div>
+                  
+                  {/* Secured by Razorpay Logo Footer */}
+                  <div className="absolute bottom-4 left-0 right-0 flex items-center justify-center gap-1">
+                    <span className="text-[10px] text-slate-400 font-semibold tracking-wide">Secured by</span>
+                    <svg className="h-3 w-5 fill-blue-600 self-center" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M15 2 L2 18 L7 18 L18 2 Z" />
+                    </svg>
+                    <span className="font-sans font-black italic text-slate-700 text-xs tracking-tighter">Razorpay</span>
+                  </div>
+                </div>
+              )}
+
+              {paymentStep === 'success' && (
+                <div className="py-12 flex flex-col items-center justify-center space-y-5 animate-in zoom-in-95 duration-300 text-center">
+                  <style>{`
+                    @keyframes rzp-stroke {
+                      100% { stroke-dashoffset: 0; }
+                    }
+                    @keyframes rzp-scale {
+                      0%, 100% { transform: none; }
+                      50% { transform: scale3d(1.15, 1.15, 1); }
+                    }
+                    @keyframes rzp-fill {
+                      100% { box-shadow: inset 0px 0px 0px 40px #ffffff; }
+                    }
+                    .rzp-circle {
+                      stroke-dasharray: 166;
+                      stroke-dashoffset: 166;
+                      stroke-width: 4;
+                      stroke-miterlimit: 10;
+                      stroke: #ffffff;
+                      fill: none;
+                      animation: rzp-stroke 0.6s cubic-bezier(0.65, 0, 0.45, 1) forwards;
+                    }
+                    .rzp-check-icon {
+                      width: 72px;
+                      height: 72px;
+                      border-radius: 50%;
+                      display: block;
+                      stroke-width: 4;
+                      stroke: #19b889;
+                      stroke-miterlimit: 10;
+                      box-shadow: inset 0px 0px 0px #ffffff;
+                      animation: rzp-fill .4s ease-in-out .4s forwards, rzp-scale .3s ease-in-out .9s both;
+                    }
+                    .rzp-check-path {
+                      transform-origin: 50% 50%;
+                      stroke-dasharray: 48;
+                      stroke-dashoffset: 48;
+                      animation: rzp-stroke 0.3s cubic-bezier(0.65, 0, 0.45, 1) 0.8s forwards;
+                    }
+                  `}</style>
+                  
+                  <div className="flex items-center justify-center">
+                    <svg className="rzp-check-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
+                      <circle className="rzp-circle" cx="26" cy="26" r="25" fill="none" />
+                      <path className="rzp-check-path" fill="none" d="M14.1 27.2l7.1 7.2 16.7-16.8" />
+                    </svg>
+                  </div>
+                  
+                  <div className="text-center space-y-1">
+                    <h4 className="font-black text-white text-xl tracking-tight">Merchant License Activated</h4>
+                    <p className="text-xs text-emerald-100 font-semibold opacity-90">Payment logged successfully in system database.</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Razorpay Footer */}
+            {paymentStep !== 'success' && (
+              <div className="p-4 bg-[#071324] border-t border-blue-900/30 flex items-center justify-between text-[10px] text-slate-400 font-semibold px-6">
+                <span className="flex items-center gap-1">
+                  🛡️ PCI-DSS Compliant
+                </span>
+                <span className="flex items-center gap-1 uppercase tracking-wider text-slate-500 font-black">
+                  Razorpay Secure
+                </span>
+              </div>
+            )}
           </div>
         </div>
       )}

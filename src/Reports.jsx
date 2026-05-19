@@ -29,7 +29,7 @@ const formatDate = (dateInput) => {
 export default function Reports() {
   const savedShop = localStorage.getItem('shopInfo');
   const activeShop = savedShop ? JSON.parse(savedShop) : {
-    customerUniqueId: 'MC-89324',
+    customerUniqueId: 'CV-00001',
     shopName: shopDetails.name,
     proprietorName: 'Mohammad Farooq Momin',
     address: shopDetails.address,
@@ -38,6 +38,7 @@ export default function Reports() {
   };
   const [reportType, setReportType] = useState('outstanding_balances');
   const [selectedSupplier, setSelectedSupplier] = useState('ALL');
+  const [dailyViewMode, setDailyViewMode] = useState('summary'); // 'summary' or 'details'
   
   // Date filters
   const today = new Date().toISOString().split('T')[0];
@@ -169,7 +170,8 @@ export default function Reports() {
     const to = new Date(toDate); to.setHours(23, 59, 59, 999);
 
     let openingBalance = 0;
-    let timeline = [];
+    let purchases = [];
+    let payments = [];
 
     // Filter Inwards for this supplier
     stockInwards.filter(i => selectedSupplier === 'ALL' || i.supplierId === parseInt(selectedSupplier)).forEach(item => {
@@ -179,14 +181,15 @@ export default function Reports() {
       if (isDateBefore(itemDate, from)) {
         openingBalance += amount;
       } else if (isDateInRange(itemDate, from, to)) {
-        const descPrefix = selectedSupplier === 'ALL' ? `[${item.supplierName}] ` : '';
-        timeline.push({
+        purchases.push({
           id: item.id,
           date: itemDate,
-          type: 'bill',
-          description: `🚚 ${descPrefix}Delivery: ${item.numberOfBirds} ${item.chickenType} (${item.weight}kg @ ₹${item.rate})`,
-          billAmount: amount,
-          paymentAmount: 0
+          qty: item.numberOfBirds || 0,
+          details: item.chickenType || 'Broiler',
+          weight: item.weight || 0,
+          rate: item.rate || 0,
+          amount: amount,
+          supplierName: item.supplierName
         });
       }
     });
@@ -199,33 +202,42 @@ export default function Reports() {
       if (isDateBefore(itemDate, from)) {
         openingBalance -= amount;
       } else if (isDateInRange(itemDate, from, to)) {
-        const descPrefix = selectedSupplier === 'ALL' ? `[${item.supplierName}] ` : '';
-        let paymentDesc = `💵 ${descPrefix}Payment: ${item.paymentMode}`;
-        if (item.paymentMode === 'Cheque') paymentDesc += ` (${item.bankName?.split(' ')[0]} #${item.referenceNo})`;
-        if (item.paymentMode === 'Bank Transfer') paymentDesc += ` (Ref: ${item.referenceNo})`;
-
-        timeline.push({
+        let particulars = item.paymentMode || 'CASH A/C';
+        if (item.paymentMode === 'Cheque') particulars += ` (${item.bankName?.split(' ')[0]} #${item.referenceNo})`;
+        if (item.paymentMode === 'Bank Transfer') particulars += ` (Ref: ${item.referenceNo})`;
+        
+        payments.push({
           id: item.id,
           date: itemDate,
-          type: 'payment',
-          description: paymentDesc,
-          billAmount: 0,
-          paymentAmount: amount
+          particulars: particulars,
+          amount: amount,
+          supplierName: item.supplierName
         });
       }
     });
 
-    // Sort Chronologically
-    timeline.sort((a, b) => a.date - b.date);
+    // Sort chronologically
+    purchases.sort((a, b) => a.date - b.date);
+    payments.sort((a, b) => a.date - b.date);
 
-    // Calculate Running Balance
-    let runningBalance = openingBalance;
-    const finalLedger = timeline.map(t => {
-      runningBalance = runningBalance + t.billAmount - t.paymentAmount;
-      return { ...t, balance: runningBalance };
-    });
+    const totalPurchaseQty = purchases.reduce((sum, p) => sum + p.qty, 0);
+    const totalPurchaseWeight = purchases.reduce((sum, p) => sum + p.weight, 0);
+    const totalPurchaseAmount = purchases.reduce((sum, p) => sum + p.amount, 0);
+    
+    const totalCollectionAmount = payments.reduce((sum, p) => sum + p.amount, 0);
+    
+    const closingBalance = openingBalance + totalPurchaseAmount - totalCollectionAmount;
 
-    return { openingBalance, timeline: finalLedger, closingBalance: runningBalance };
+    return {
+      openingBalance,
+      purchases,
+      payments,
+      totalPurchaseQty,
+      totalPurchaseWeight,
+      totalPurchaseAmount,
+      totalCollectionAmount,
+      closingBalance
+    };
   };
 
 
@@ -243,10 +255,143 @@ export default function Reports() {
     });
   };
 
+  // -------------------------------------------------------------
+  // DATA PROCESSING: DAILY TRANSACTION RECONCILIATION
+  // -------------------------------------------------------------
+  const generateDailyTransactions = () => {
+    const from = new Date(fromDate); from.setHours(0, 0, 0, 0);
+    const to = new Date(toDate); to.setHours(23, 59, 59, 999);
+
+    const dailyData = {};
+
+    const toLocalDateStr = (dateObj) => {
+      const year = dateObj.getFullYear();
+      const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const day = String(dateObj.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    let curDate = new Date(from);
+    while (curDate <= to) {
+      const dateStr = toLocalDateStr(curDate);
+      dailyData[dateStr] = {
+        dateStr,
+        billsCount: 0,
+        cashSales: 0,
+        upiSales: 0,
+        totalSales: 0,
+        expenses: 0,
+        supplierPaymentsCash: 0,
+        supplierPaymentsOthers: 0,
+        expectedCash: 0,
+        salesList: []
+      };
+      curDate.setDate(curDate.getDate() + 1);
+    }
+
+    sales.forEach(sale => {
+      const saleDate = sale.timestamp ? sale.timestamp.toDate() : new Date();
+      const dateStr = toLocalDateStr(saleDate);
+      
+      if (isDateInRange(saleDate, from, to)) {
+        if (!dailyData[dateStr]) {
+          dailyData[dateStr] = {
+            dateStr,
+            billsCount: 0,
+            cashSales: 0,
+            upiSales: 0,
+            totalSales: 0,
+            expenses: 0,
+            supplierPaymentsCash: 0,
+            supplierPaymentsOthers: 0,
+            expectedCash: 0,
+            salesList: []
+          };
+        }
+        
+        const totalAmt = sale.total || 0;
+        dailyData[dateStr].billsCount += 1;
+        dailyData[dateStr].totalSales += totalAmt;
+        if (sale.paymentMethod === 'cash') {
+          dailyData[dateStr].cashSales += totalAmt;
+        } else if (sale.paymentMethod === 'upi') {
+          dailyData[dateStr].upiSales += totalAmt;
+        }
+        
+        dailyData[dateStr].salesList.push({
+          id: sale.id,
+          time: saleDate,
+          workerName: sale.workerName || 'Unknown',
+          shift: sale.shift || 'Morning Shift',
+          paymentMethod: sale.paymentMethod || 'cash',
+          total: totalAmt,
+          itemsSummary: sale.items?.map(i => `${i.productName} (${i.quantity} ${i.unit || 'kg'})`).join(', ') || 'N/A'
+        });
+      }
+    });
+
+    expenses.forEach(exp => {
+      const dateStr = exp.date;
+      if (dateStr >= fromDate && dateStr <= toDate) {
+        if (!dailyData[dateStr]) {
+          dailyData[dateStr] = {
+            dateStr,
+            billsCount: 0,
+            cashSales: 0,
+            upiSales: 0,
+            totalSales: 0,
+            expenses: 0,
+            supplierPaymentsCash: 0,
+            supplierPaymentsOthers: 0,
+            expectedCash: 0,
+            salesList: []
+          };
+        }
+        dailyData[dateStr].expenses += exp.amount || 0;
+      }
+    });
+
+    supplierPayments.forEach(pay => {
+      const payDate = pay.timestamp ? pay.timestamp.toDate() : new Date(pay.paymentDate);
+      const dateStr = toLocalDateStr(payDate);
+      
+      if (isDateInRange(payDate, from, to)) {
+        if (!dailyData[dateStr]) {
+          dailyData[dateStr] = {
+            dateStr,
+            billsCount: 0,
+            cashSales: 0,
+            upiSales: 0,
+            totalSales: 0,
+            expenses: 0,
+            supplierPaymentsCash: 0,
+            supplierPaymentsOthers: 0,
+            expectedCash: 0,
+            salesList: []
+          };
+        }
+        const amt = pay.amount || 0;
+        if (pay.paymentMode?.toLowerCase() === 'cash') {
+          dailyData[dateStr].supplierPaymentsCash += amt;
+        } else {
+          dailyData[dateStr].supplierPaymentsOthers += amt;
+        }
+      }
+    });
+
+    Object.values(dailyData).forEach(day => {
+      day.expectedCash = day.cashSales - day.expenses - day.supplierPaymentsCash;
+      day.salesList.sort((a, b) => b.time - a.time);
+    });
+
+    return Object.values(dailyData).sort((a, b) => b.dateStr.localeCompare(a.dateStr));
+  };
+
   // View Computations
   const outstandingData = reportType === 'outstanding_balances' ? generateOutstandingBalances() : [];
-  const ledgerData = reportType === 'supplier_ledger' ? generateSupplierLedger() : { timeline: [] };
+  const ledgerData = reportType === 'supplier_ledger' ? generateSupplierLedger() : { purchases: [], payments: [], openingBalance: 0, closingBalance: 0, totalPurchaseQty: 0, totalPurchaseWeight: 0, totalPurchaseAmount: 0, totalCollectionAmount: 0 };
   const rawData = reportType === 'stock_inward' ? generateRawStockInward() : [];
+  const dailyTransactionsData = reportType === 'daily_transactions' ? generateDailyTransactions() : [];
 
   // Totals for Outstanding Balances
   const totalOutstandingDue = outstandingData.reduce((sum, s) => sum + s.netDue, 0);
@@ -255,6 +400,14 @@ export default function Reports() {
   const rawTotalWeight = rawData.reduce((sum, item) => sum + (item.weight || 0), 0);
   const rawTotalBirds = rawData.reduce((sum, item) => sum + (item.numberOfBirds || 0), 0);
   const rawTotalValue = rawData.reduce((sum, item) => sum + (item.totalValue || 0), 0);
+
+  // Totals for Daily Transactions Audit
+  const totalSalesAudit = dailyTransactionsData.reduce((sum, d) => sum + d.totalSales, 0);
+  const totalCashSalesAudit = dailyTransactionsData.reduce((sum, d) => sum + d.cashSales, 0);
+  const totalUpiSalesAudit = dailyTransactionsData.reduce((sum, d) => sum + d.upiSales, 0);
+  const totalExpensesAudit = dailyTransactionsData.reduce((sum, d) => sum + d.expenses, 0);
+  const totalSupplierPaymentsCashAudit = dailyTransactionsData.reduce((sum, d) => sum + d.supplierPaymentsCash, 0);
+  const totalExpectedCashAudit = dailyTransactionsData.reduce((sum, d) => sum + d.expectedCash, 0);
 
   // --- EXPORT FUNCTIONS ---
   const handlePrint = () => window.print();
@@ -286,26 +439,107 @@ export default function Reports() {
     } 
     else if (reportType === 'supplier_ledger') {
       const supplierName = selectedSupplier === 'ALL' ? 'Consolidated (All Suppliers)' : (initialSuppliers.find(s => s.id === parseInt(selectedSupplier))?.name || 'Unknown');
-      doc.text(`Supplier Ledger: ${supplierName}`, 14, 41);
+      doc.text(`Party Name: ${supplierName}`, 14, 41);
       doc.setFontSize(10); doc.setTextColor(100); doc.text(`Period: ${formatDate(fromDate)} to ${formatDate(toDate)}`, 14, 47);
 
-      const tableColumn = ["Date", "Description", "Bill Amount", "Payment Made", "Net Balance"];
-      const tableRows = [
-        ['', 'OPENING BALANCE', '-', '-', `${ledgerData.openingBalance >= 0 ? '' : 'Adv '}${Math.abs(ledgerData.openingBalance).toFixed(2)}`]
-      ];
-      
-      ledgerData.timeline.forEach(t => {
-        tableRows.push([
-          formatDate(t.date), t.description, 
-          t.billAmount ? t.billAmount.toFixed(2) : '-', 
-          t.paymentAmount ? t.paymentAmount.toFixed(2) : '-',
-          `${t.balance >= 0 ? '' : 'Adv '}${Math.abs(t.balance).toFixed(2)}`
-        ]);
+      // Left Table: Purchase for the Week
+      const leftCol = ["Date", "Qty", "Details", "KGs.", "Rate", "Amount"];
+      const leftRows = ledgerData.purchases.map(p => [
+        formatDate(p.date), p.qty || '-', p.details, p.weight ? p.weight.toFixed(2) : '-', p.rate || '-', p.amount.toFixed(0)
+      ]);
+      leftRows.push(['TOTAL', ledgerData.totalPurchaseQty, '', ledgerData.totalPurchaseWeight.toFixed(2), '', ledgerData.totalPurchaseAmount.toFixed(0)]);
+
+      // Right Table: Payments Made
+      const rightCol = ["Date", "Particulars", "Amount"];
+      const rightRows = ledgerData.payments.map(py => [
+        formatDate(py.date), py.particulars, py.amount.toFixed(0)
+      ]);
+      rightRows.push(['PAYMENT TOTAL', '', ledgerData.totalCollectionAmount.toFixed(0)]);
+
+      // Draw Left Table
+      autoTable(doc, { 
+        head: [leftCol], 
+        body: leftRows, 
+        startY: 53, 
+        margin: { left: 14 }, 
+        tableWidth: 130, 
+        theme: 'grid', 
+        styles: { fontSize: 8 }, 
+        headStyles: { fillColor: [244, 63, 94] }
       });
+
+      // Draw Right Table side-by-side
+      autoTable(doc, { 
+        head: [rightCol], 
+        body: rightRows, 
+        startY: 53, 
+        margin: { left: 150 }, 
+        tableWidth: 130, 
+        theme: 'grid', 
+        styles: { fontSize: 8 }, 
+        headStyles: { fillColor: [16, 185, 129] }
+      });
+
+      // Get the lower of the two tables' bottom Y coordinate
+      const finalY = Math.max(doc.lastAutoTable.finalY || 100, 100);
+
+      // Add Reconciliation Box below
+      doc.setFontSize(10);
+      doc.setTextColor(50);
+      doc.rect(14, finalY + 10, 100, 35);
+      doc.text("ACCOUNT RECONCILIATION", 18, finalY + 15);
+      doc.setFontSize(8);
+      doc.text(`PREVIOUS BALANCE:`, 18, finalY + 22);
+      doc.text(`₹${ledgerData.openingBalance.toFixed(0)}`, 85, finalY + 22, { align: 'right' });
+      doc.text(`ADD PURCHASE FOR THE WEEK (+):`, 18, finalY + 27);
+      doc.text(`₹${ledgerData.totalPurchaseAmount.toFixed(0)}`, 85, finalY + 27, { align: 'right' });
+      doc.text(`LESS PAYMENT MADE (-):`, 18, finalY + 32);
+      doc.text(`₹${ledgerData.totalCollectionAmount.toFixed(0)}`, 85, finalY + 32, { align: 'right' });
+      
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "bold");
+      doc.text(`FINAL TOTAL PAYABLE:`, 18, finalY + 40);
+      doc.text(`₹${ledgerData.closingBalance.toFixed(0)}`, 85, finalY + 40, { align: 'right' });
+
+      // Note
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(10);
+      doc.text("NOTE: BALANCE PAYABLE", 150, finalY + 20);
+      
+      // Signatures
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.text("Cashier Sign", 150, finalY + 40);
+      doc.line(150, finalY + 37, 180, finalY + 37);
+      
+      doc.text("Party Sign", 210, finalY + 40);
+      doc.line(210, finalY + 37, 240, finalY + 37);
+    }
+
+    else if (reportType === 'daily_transactions') {
+      doc.text('Daily Transactions Audit & Reconciliation', 14, 41);
+      doc.setFontSize(10); doc.setTextColor(100); doc.text(`Period: ${formatDate(fromDate)} to ${formatDate(toDate)}`, 14, 47);
+
+      const tableColumn = ["Date", "Bills", "Cash Sales", "UPI Sales", "Total Sales", "Petty Exp", "Supplier Cash", "Expected Cash"];
+      const tableRows = dailyTransactionsData.map(d => [
+        formatDate(d.dateStr), d.billsCount, d.cashSales.toFixed(0), d.upiSales.toFixed(0), 
+        d.totalSales.toFixed(0), d.expenses.toFixed(0), d.supplierPaymentsCash.toFixed(0), 
+        d.expectedCash.toFixed(0)
+      ]);
+      
+      tableRows.push([
+        'TOTAL', 
+        dailyTransactionsData.reduce((sum, d) => sum + d.billsCount, 0),
+        totalCashSalesAudit.toFixed(0), 
+        totalUpiSalesAudit.toFixed(0), 
+        totalSalesAudit.toFixed(0), 
+        totalExpensesAudit.toFixed(0), 
+        totalSupplierPaymentsCashAudit.toFixed(0), 
+        totalExpectedCashAudit.toFixed(0)
+      ]);
 
       autoTable(doc, { head: [tableColumn], body: tableRows, startY: 53, theme: 'grid', styles: { fontSize: 9 }, headStyles: { fillColor: [244, 63, 94] }});
     }
-
     else {
       doc.text('Stock Inward Report', 14, 41);
       doc.setFontSize(10); doc.setTextColor(100); doc.text(`Period: ${formatDate(fromDate)} to ${formatDate(toDate)}`, 14, 47);
@@ -337,16 +571,61 @@ export default function Reports() {
       wsData.push(['TOTAL', '', '', '', totalOutstandingDue]);
     } 
     else if (reportType === 'supplier_ledger') {
-      wsData.push(["Date", "Description", "Bill Amount", "Payment Made", "Net Balance"]);
-      wsData.push(['', 'OPENING BALANCE', '', '', ledgerData.openingBalance]);
-      ledgerData.timeline.forEach(t => {
+      wsData.push(["PURCHASE FOR THE WEEK", "", "", "", "", "", "PAYMENTS MADE / GOODS RETURN"]);
+      wsData.push(["Date", "Qty", "Details", "KGs.", "Rate", "Amount", "Date", "Particulars", "Amount"]);
+      
+      const maxLength = Math.max(ledgerData.purchases.length, ledgerData.payments.length);
+      for (let i = 0; i < maxLength; i++) {
+        const p = ledgerData.purchases[i] || {};
+        const py = ledgerData.payments[i] || {};
+        
         wsData.push([
-          formatDate(t.date), t.description, 
-          t.billAmount || '', t.paymentAmount || '', t.balance
+          p.date ? formatDate(p.date) : "",
+          p.qty || "",
+          p.details || "",
+          p.weight || "",
+          p.rate || "",
+          p.amount || "",
+          py.date ? formatDate(py.date) : "",
+          py.particulars || "",
+          py.amount || ""
         ]);
-      });
+      }
+      
+      wsData.push([
+        "TOTAL", ledgerData.totalPurchaseQty, "", ledgerData.totalPurchaseWeight, "", ledgerData.totalPurchaseAmount,
+        "PAYMENT TOTAL", "", ledgerData.totalCollectionAmount
+      ]);
+      
+      wsData.push([]);
+      wsData.push(["ACCOUNT RECONCILIATION"]);
+      wsData.push(["PREVIOUS BALANCE", ledgerData.openingBalance]);
+      wsData.push(["ADD PURCHASE FOR THE WEEK", ledgerData.totalPurchaseAmount]);
+      wsData.push(["LESS PAYMENT MADE", ledgerData.totalCollectionAmount]);
+      wsData.push(["FINAL TOTAL PAYABLE", ledgerData.closingBalance]);
+      wsData.push([]);
+      wsData.push(["NOTE : BALANCE PAYABLE"]);
     }
 
+    else if (reportType === 'daily_transactions') {
+      wsData.push(["Date", "Bills Raised", "Cash Sales (A)", "UPI Sales (B)", "Total Sales (A+B)", "Petty Expenses (C)", "Supplier Cash Payments (D)", "Expected Cash (A-C-D)"]);
+      dailyTransactionsData.forEach(d => {
+        wsData.push([
+          formatDate(d.dateStr), d.billsCount, d.cashSales, d.upiSales, 
+          d.totalSales, d.expenses, d.supplierPaymentsCash, d.expectedCash
+        ]);
+      });
+      wsData.push([
+        'TOTAL',
+        dailyTransactionsData.reduce((sum, d) => sum + d.billsCount, 0),
+        totalCashSalesAudit,
+        totalUpiSalesAudit,
+        totalSalesAudit,
+        totalExpensesAudit,
+        totalSupplierPaymentsCashAudit,
+        totalExpectedCashAudit
+      ]);
+    }
     else {
       wsData.push(["Date", "Supplier", "Type", "Vehicle", "Birds", "Weight (kg)", "Rate/kg", "Payment", "Total Value"]);
       rawData.forEach(item => {
@@ -387,6 +666,7 @@ export default function Reports() {
                   <option value="outstanding_balances">Outstanding Balances (Master)</option>
                   <option value="supplier_ledger">Supplier Ledger (Detailed)</option>
                   <option value="stock_inward">Raw Stock Inward Data</option>
+                  <option value="daily_transactions">Daily Transactions (Audit & Tally)</option>
                 </select>
               </div>
 
@@ -447,7 +727,8 @@ export default function Reports() {
           <h2 className="text-xl font-bold text-slate-800 mb-1">
             {reportType === 'outstanding_balances' ? 'Outstanding Balances Dashboard' : 
              reportType === 'supplier_ledger' ? 'Detailed Supplier Ledger' : 
-             reportType === 'day_summary' ? 'Day Summary Report' : 'Raw Stock Inward Report'}
+             reportType === 'day_summary' ? 'Day Summary Report' : 
+             reportType === 'daily_transactions' ? 'Daily Transactions Tally & Audit' : 'Raw Stock Inward Report'}
           </h2>
           <p className="text-sm text-slate-500">
             {reportType === 'day_summary' ? `Date: ${formatDate(fromDate)}` : `Period: ${formatDate(fromDate)} to ${formatDate(toDate)}`}
@@ -496,51 +777,186 @@ export default function Reports() {
 
           {/* 2. SUPPLIER LEDGER VIEW */}
           {reportType === 'supplier_ledger' && (
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 print:bg-slate-100">
-                  <th className="p-4 font-semibold text-slate-600">Date</th>
-                  <th className="p-4 font-semibold text-slate-600">Description</th>
-                  <th className="p-4 font-semibold text-red-600 text-right">Bill Amount (🔴)</th>
-                  <th className="p-4 font-semibold text-green-600 text-right">Payment Made (🟢)</th>
-                  <th className="p-4 font-bold text-slate-800 text-right">Net Balance</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 print:divide-slate-300">
-                {/* Opening Balance Row */}
-                <tr className="bg-slate-50/50">
-                  <td className="p-4 text-sm text-slate-500">Before {formatDate(fromDate)}</td>
-                  <td className="p-4 font-bold text-slate-700">OPENING BALANCE</td>
-                  <td className="p-4"></td>
-                  <td className="p-4"></td>
-                  <td className={`p-4 text-right font-bold ${ledgerData.openingBalance > 0 ? 'text-red-600' : 'text-slate-800'}`}>
-                    ₹{ledgerData.openingBalance.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                  </td>
-                </tr>
-                {/* Transactions */}
-                {ledgerData.timeline.length > 0 ? ledgerData.timeline.map(t => (
-                  <tr key={t.id} className="hover:bg-slate-50">
-                    <td className="p-4 text-sm font-medium whitespace-nowrap">{formatDate(t.date)}</td>
-                    <td className="p-4 text-slate-700 whitespace-nowrap">{t.description}</td>
-                    <td className="p-4 text-right font-medium text-red-500 whitespace-nowrap">{t.billAmount > 0 ? t.billAmount.toLocaleString('en-IN') : '-'}</td>
-                    <td className="p-4 text-right font-medium text-green-500 whitespace-nowrap">{t.paymentAmount > 0 ? t.paymentAmount.toLocaleString('en-IN') : '-'}</td>
-                    <td className={`p-4 text-right font-bold whitespace-nowrap ${t.balance > 0 ? 'text-red-600' : t.balance < 0 ? 'text-green-600' : 'text-slate-800'}`}>
-                      ₹{Math.abs(t.balance).toLocaleString('en-IN', { maximumFractionDigits: 0 })} {t.balance < 0 && '(Adv)'}
-                    </td>
-                  </tr>
-                )) : (
-                  <tr><td colSpan="5" className="p-8 text-center text-slate-500">No transactions in this period.</td></tr>
-                )}
-              </tbody>
-              <tfoot className="bg-slate-50 border-t-2 border-slate-200 print:bg-slate-100">
-                <tr>
-                  <td colSpan="4" className="p-4 text-right font-bold text-slate-700">CLOSING BALANCE:</td>
-                  <td className={`p-4 text-right font-bold text-xl ${ledgerData.closingBalance > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                    ₹{Math.abs(ledgerData.closingBalance || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })} {ledgerData.closingBalance < 0 && '(Advance)'}
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
+            <div className="p-4 sm:p-6 bg-white dark:bg-slate-900">
+              
+              {/* Header Info (for screen and print) */}
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-200 dark:border-slate-800 pb-4 mb-4 gap-4">
+                <div>
+                  <h3 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-wider">
+                    Party Name: <span className="text-primary-600 dark:text-primary-400">{
+                      selectedSupplier === 'ALL' 
+                        ? 'Consolidated (All Suppliers)' 
+                        : (initialSuppliers.find(s => s.id === parseInt(selectedSupplier))?.name || 'Unknown')
+                    }</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Bill Period: {formatDate(fromDate)} to {formatDate(toDate)}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <span className="px-3 py-1 bg-slate-100 dark:bg-slate-800 rounded-full text-xs font-bold text-slate-600 dark:text-slate-400">
+                    Weekly Statement
+                  </span>
+                </div>
+              </div>
+
+              {/* Side-by-Side Tables Grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 print:grid-cols-2 print:gap-4">
+                
+                {/* Left Table: PURCHASE FOR THE WEEK */}
+                <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden flex flex-col justify-between">
+                  <div>
+                    <div className="bg-slate-50 dark:bg-slate-800 px-4 py-2.5 border-b border-slate-200 dark:border-slate-800">
+                      <h4 className="text-xs font-black text-slate-700 dark:text-slate-200 uppercase tracking-wider">
+                        Purchase For The Week
+                      </h4>
+                    </div>
+                    <table className="w-full text-[11px] border-collapse text-left">
+                      <thead>
+                        <tr className="bg-slate-100/50 dark:bg-slate-855 border-b border-slate-200 dark:border-slate-800 font-bold text-slate-500">
+                          <th className="p-2 border-r border-slate-200 dark:border-slate-800">DATE</th>
+                          <th className="p-2 border-r border-slate-200 dark:border-slate-800 text-right">QTY</th>
+                          <th className="p-2 border-r border-slate-200 dark:border-slate-800">DETAILS</th>
+                          <th className="p-2 border-r border-slate-200 dark:border-slate-800 text-right">KGs.</th>
+                          <th className="p-2 border-r border-slate-200 dark:border-slate-800 text-right">RATE</th>
+                          <th className="p-2 text-right">AMOUNT</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-150 dark:divide-slate-800/80">
+                        {ledgerData.purchases?.length > 0 ? (
+                          ledgerData.purchases.map(p => (
+                            <tr key={p.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-855/30">
+                              <td className="p-2 border-r border-slate-200 dark:border-slate-800 whitespace-nowrap">{formatDate(p.date)}</td>
+                              <td className="p-2 border-r border-slate-200 dark:border-slate-800 text-right">{p.qty || '-'}</td>
+                              <td className="p-2 border-r border-slate-200 dark:border-slate-800 truncate max-w-[80px]" title={p.details}>
+                                {selectedSupplier === 'ALL' ? `[${p.supplierName.split(' ')[0]}] ${p.details}` : p.details}
+                              </td>
+                              <td className="p-2 border-r border-slate-200 dark:border-slate-800 text-right">{p.weight ? p.weight.toFixed(2) : '-'}</td>
+                              <td className="p-2 border-r border-slate-200 dark:border-slate-800 text-right">₹{p.rate || '-'}</td>
+                              <td className="p-2 text-right font-bold text-slate-800 dark:text-slate-200">₹{p.amount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan="6" className="p-4 text-center text-slate-400">No purchases found in this period.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Table Total Footer */}
+                  <div className="bg-slate-100/80 dark:bg-slate-800/60 border-t border-slate-200 dark:border-slate-800 p-2.5 text-[11px] font-black grid grid-cols-6 text-slate-700 dark:text-slate-350">
+                    <div className="col-span-1">TOTAL</div>
+                    <div className="text-right border-r border-slate-200 dark:border-slate-800 pr-2">{ledgerData.totalPurchaseQty || 0}</div>
+                    <div className="border-r border-slate-200 dark:border-slate-800"></div>
+                    <div className="text-right border-r border-slate-200 dark:border-slate-800 pr-2">{ledgerData.totalPurchaseWeight ? ledgerData.totalPurchaseWeight.toFixed(2) : '0.00'}</div>
+                    <div className="border-r border-slate-200 dark:border-slate-800"></div>
+                    <div className="text-right text-slate-900 dark:text-white">₹{(ledgerData.totalPurchaseAmount || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+                  </div>
+                </div>
+
+                {/* Right Table: COLLECTION RECEIVED / GOODS RETURN */}
+                <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden flex flex-col justify-between">
+                  <div>
+                    <div className="bg-slate-50 dark:bg-slate-800 px-4 py-2.5 border-b border-slate-200 dark:border-slate-800">
+                      <h4 className="text-xs font-black text-slate-700 dark:text-slate-200 uppercase tracking-wider">
+                        Payments Made / Goods Return
+                      </h4>
+                    </div>
+                    <table className="w-full text-[11px] border-collapse text-left">
+                      <thead>
+                        <tr className="bg-slate-100/50 dark:bg-slate-855 border-b border-slate-200 dark:border-slate-800 font-bold text-slate-500">
+                          <th className="p-2 border-r border-slate-200 dark:border-slate-800">DATE</th>
+                          <th className="p-2 border-r border-slate-200 dark:border-slate-800 text-right">QTY</th>
+                          <th className="p-2 border-r border-slate-200 dark:border-slate-800">PARTICULARS</th>
+                          <th className="p-2 border-r border-slate-200 dark:border-slate-800 text-right">KGs.</th>
+                          <th className="p-2 border-r border-slate-200 dark:border-slate-800 text-right">RATE</th>
+                          <th className="p-2 text-right">AMOUNT</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-150 dark:divide-slate-800/80">
+                        {ledgerData.payments?.length > 0 ? (
+                          ledgerData.payments.map(py => (
+                            <tr key={py.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-855/30">
+                              <td className="p-2 border-r border-slate-200 dark:border-slate-800 whitespace-nowrap">{formatDate(py.date)}</td>
+                              <td className="p-2 border-r border-slate-200 dark:border-slate-800 text-right">-</td>
+                              <td className="p-2 border-r border-slate-200 dark:border-slate-800 truncate max-w-[120px]" title={py.particulars}>
+                                {selectedSupplier === 'ALL' ? `[${py.supplierName.split(' ')[0]}] ${py.particulars}` : py.particulars}
+                              </td>
+                              <td className="p-2 border-r border-slate-200 dark:border-slate-800 text-right">-</td>
+                              <td className="p-2 border-r border-slate-200 dark:border-slate-800 text-right">-</td>
+                              <td className="p-2 text-right font-bold text-emerald-600 dark:text-emerald-400">₹{py.amount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan="6" className="p-4 text-center text-slate-400">No payments/collections found in this period.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Table Total Footer */}
+                  <div className="bg-slate-100/80 dark:bg-slate-800/60 border-t border-slate-200 dark:border-slate-800 p-2.5 text-[11px] font-black flex justify-between items-center text-slate-700 dark:text-slate-350">
+                    <div>PAYMENT TOTAL</div>
+                    <div className="text-right text-emerald-700 dark:text-emerald-400">₹{(ledgerData.totalCollectionAmount || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Bottom Summary Reconciliation Details */}
+              <div className="mt-6 pt-5 border-t border-slate-200 dark:border-slate-800 grid grid-cols-1 lg:grid-cols-2 gap-6 print:grid-cols-2 print:gap-4 text-[11px]">
+                
+                {/* Reconciliation math breakdown */}
+                <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden max-w-sm">
+                  <div className="bg-slate-50 dark:bg-slate-800 px-3.5 py-2 border-b border-slate-200 dark:border-slate-800">
+                    <span className="font-extrabold text-slate-700 dark:text-slate-200 uppercase tracking-wider">Account Balance Reconciliation</span>
+                  </div>
+                  <table className="w-full text-left font-semibold">
+                    <tbody>
+                      <tr className="border-b border-slate-100 dark:border-slate-800/50">
+                        <td className="p-2.5 text-slate-500">PREVIOUS BALANCE</td>
+                        <td className="p-2.5 text-right text-slate-700 dark:text-slate-300 font-bold">₹{ledgerData.openingBalance.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                      </tr>
+                      <tr className="border-b border-slate-100 dark:border-slate-800/50">
+                        <td className="p-2.5 text-slate-500">ADD PURCHASE FOR THE WEEK (+)</td>
+                        <td className="p-2.5 text-right text-rose-600 dark:text-rose-400 font-bold">₹{ledgerData.totalPurchaseAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                      </tr>
+                      <tr className="border-b border-slate-100 dark:border-slate-800/50">
+                        <td className="p-2.5 text-slate-500">LESS PAYMENT MADE (-)</td>
+                        <td className="p-2.5 text-right text-emerald-600 dark:text-emerald-400 font-bold">₹{ledgerData.totalCollectionAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                      </tr>
+                      <tr className="bg-slate-50 dark:bg-slate-850 font-black text-slate-900 dark:text-white">
+                        <td className="p-2.5 text-xs">FINAL TOTAL PAYABLE</td>
+                        <td className="p-2.5 text-right text-xs text-primary-600 dark:text-primary-400">
+                          ₹{ledgerData.closingBalance.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Print Notice & Signatures */}
+                <div className="flex flex-col justify-between py-2 text-right">
+                  <div className="text-slate-500 dark:text-slate-400 font-black italic pr-2 text-xs">
+                    NOTE : BALANCE PAYABLE
+                  </div>
+                  <div className="pt-10 flex justify-end gap-16 text-slate-400 dark:text-slate-500 font-bold text-[10px]">
+                    <div className="text-center w-24 border-t border-slate-200 dark:border-slate-800 pt-1">
+                      Cashier Sign
+                    </div>
+                    <div className="text-center w-24 border-t border-slate-200 dark:border-slate-800 pt-1">
+                      Party Sign
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+            </div>
           )}
 
           {/* 3. RAW STOCK INWARD VIEW (Legacy/Detailed) */}
@@ -580,6 +996,144 @@ export default function Reports() {
                </tr>
              </tfoot>
            </table>
+          )}
+
+          {/* 4. DAILY TRANSACTION AUDIT & RECONCILIATION VIEW */}
+          {reportType === 'daily_transactions' && (
+            <div className="space-y-6">
+              {/* Controls for Detailed vs Summary - Hidden in Print */}
+              <div className="flex justify-between items-center px-6 py-4 bg-slate-50 dark:bg-slate-850/40 border-b border-slate-150 print:hidden">
+                <span className="text-sm font-semibold text-slate-500">Transaction Filter:</span>
+                <div className="flex bg-slate-100 dark:bg-slate-700/50 p-1 rounded-xl">
+                  <button 
+                    onClick={() => setDailyViewMode('summary')}
+                    className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${dailyViewMode === 'summary' ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  >
+                    📊 Day-by-Day Tally
+                  </button>
+                  <button 
+                    onClick={() => setDailyViewMode('details')}
+                    className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${dailyViewMode === 'details' ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  >
+                    🧾 Detailed Sales Invoices
+                  </button>
+                </div>
+              </div>
+
+              {/* Top reconciliation stat cards - Hidden in Print */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-6 print:hidden">
+                <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-xl border border-slate-150">
+                  <span className="text-[10px] text-slate-450 block font-bold uppercase tracking-wider">Total Sales Income</span>
+                  <span className="text-xl font-black text-slate-800 dark:text-slate-100">₹{totalSalesAudit.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+                  <span className="text-[9px] text-slate-400 block mt-1">Cash ({((totalCashSalesAudit / (totalSalesAudit || 1)) * 100).toFixed(0)}%) | UPI ({((totalUpiSalesAudit / (totalSalesAudit || 1)) * 100).toFixed(0)}%)</span>
+                </div>
+                <div className="bg-emerald-50 dark:bg-emerald-950/20 p-4 rounded-xl border border-emerald-150">
+                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 block font-bold uppercase tracking-wider">Cash Collected</span>
+                  <span className="text-xl font-black text-emerald-700 dark:text-emerald-400">₹{totalCashSalesAudit.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+                  <span className="text-[9px] text-emerald-600/70 dark:text-emerald-500/70 block mt-1">Gross cash received</span>
+                </div>
+                <div className="bg-rose-50 dark:bg-rose-950/20 p-4 rounded-xl border border-rose-150">
+                  <span className="text-[10px] text-rose-600 dark:text-rose-455 block font-bold uppercase tracking-wider">Cash Deductions</span>
+                  <span className="text-xl font-black text-rose-700 dark:text-rose-400">₹{(totalExpensesAudit + totalSupplierPaymentsCashAudit).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+                  <span className="text-[9px] text-rose-600/70 dark:text-rose-500/70 block mt-1">Expenses: ₹{totalExpensesAudit} | Supplier: ₹{totalSupplierPaymentsCashAudit}</span>
+                </div>
+                <div className="bg-indigo-50 dark:bg-indigo-950/20 p-4 rounded-xl border border-indigo-150">
+                  <span className="text-[10px] text-indigo-600 dark:text-indigo-400 block font-bold uppercase tracking-wider">Expected Cash Register</span>
+                  <span className="text-xl font-black text-indigo-700 dark:text-indigo-400">₹{totalExpectedCashAudit.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+                  <span className="text-[9px] text-indigo-650/70 dark:text-indigo-500/70 block font-bold mt-1">Verify physical drawer tally!</span>
+                </div>
+              </div>
+
+              {dailyViewMode === 'summary' ? (
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 print:bg-slate-100 text-xs sm:text-sm">
+                      <th className="p-4 font-semibold text-slate-600">Date</th>
+                      <th className="p-4 font-semibold text-slate-600 text-center">Bills</th>
+                      <th className="p-4 font-semibold text-emerald-600 text-right">Cash Sales (A)</th>
+                      <th className="p-4 font-semibold text-blue-600 text-right">UPI Sales (B)</th>
+                      <th className="p-4 font-semibold text-rose-600 text-right">Petty Expenses (C)</th>
+                      <th className="p-4 font-semibold text-amber-700 text-right">Supplier Cash (D)</th>
+                      <th className="p-4 font-bold text-slate-800 dark:text-slate-100 text-right">Expected Cash (A-C-D)</th>
+                      <th className="p-4 font-bold text-indigo-600 text-right">Total Revenue (A+B)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 print:divide-slate-300 text-xs sm:text-sm">
+                    {dailyTransactionsData.map(d => (
+                      <tr key={d.dateStr} className="hover:bg-slate-50/80">
+                        <td className="p-4 font-bold text-xs sm:text-sm whitespace-nowrap">{formatDate(d.dateStr)}</td>
+                        <td className="p-4 text-center font-medium text-slate-500">{d.billsCount}</td>
+                        <td className="p-4 text-right font-medium text-emerald-600">₹{d.cashSales.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                        <td className="p-4 text-right font-medium text-blue-600">₹{d.upiSales.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                        <td className="p-4 text-right text-rose-500">₹{d.expenses > 0 ? d.expenses.toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '0'}</td>
+                        <td className="p-4 text-right text-amber-600">₹{d.supplierPaymentsCash > 0 ? d.supplierPaymentsCash.toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '0'}</td>
+                        <td className={`p-4 text-right font-black ${d.expectedCash >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-600'}`}>
+                          ₹{d.expectedCash.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                        </td>
+                        <td className="p-4 text-right font-black text-slate-800 dark:text-slate-150">
+                          ₹{d.totalSales.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-slate-50 dark:bg-slate-800/80 border-t-2 border-slate-200 print:bg-slate-100 text-xs sm:text-sm">
+                    <tr className="font-bold">
+                      <td className="p-4 text-slate-700">GRAND TOTALS:</td>
+                      <td className="p-4 text-center text-slate-500">{dailyTransactionsData.reduce((sum, d) => sum + d.billsCount, 0)}</td>
+                      <td className="p-4 text-right text-emerald-600">₹{totalCashSalesAudit.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                      <td className="p-4 text-right text-blue-600">₹{totalUpiSalesAudit.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                      <td className="p-4 text-right text-rose-500">₹{totalExpensesAudit.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                      <td className="p-4 text-right text-amber-600">₹{totalSupplierPaymentsCashAudit.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                      <td className={`p-4 text-right text-base sm:text-lg ${totalExpectedCashAudit >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-600'}`}>
+                        ₹{totalExpectedCashAudit.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                      </td>
+                      <td className="p-4 text-right text-lg sm:text-xl text-slate-900 dark:text-white">
+                        ₹{totalSalesAudit.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              ) : (
+                <div className="px-6 pb-6">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 print:bg-slate-100">
+                        <th className="p-3 font-semibold text-slate-600 text-xs">Date / Time</th>
+                        <th className="p-3 font-semibold text-slate-600 text-xs">Cashier</th>
+                        <th className="p-3 font-semibold text-slate-600 text-xs">Shift</th>
+                        <th className="p-3 font-semibold text-slate-600 text-xs">Items Details</th>
+                        <th className="p-3 font-semibold text-slate-600 text-xs text-center">Mode</th>
+                        <th className="p-3 font-bold text-slate-850 dark:text-slate-100 text-xs text-right">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-xs">
+                      {dailyTransactionsData.flatMap(day => day.salesList).length > 0 ? (
+                        dailyTransactionsData.flatMap(day => day.salesList).map(sale => (
+                          <tr key={sale.id} className="hover:bg-slate-50">
+                            <td className="p-3 whitespace-nowrap text-slate-500">
+                              {formatDate(sale.time.toISOString().split('T')[0])} <span className="text-[10px] text-slate-450 block">{sale.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                            </td>
+                            <td className="p-3 font-medium text-slate-700 whitespace-nowrap">{sale.workerName}</td>
+                            <td className="p-3 text-slate-500 whitespace-nowrap">{sale.shift}</td>
+                            <td className="p-3 text-slate-650 dark:text-slate-300 max-w-xs sm:max-w-md truncate" title={sale.itemsSummary}>{sale.itemsSummary}</td>
+                            <td className="p-3 text-center whitespace-nowrap">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${sale.paymentMethod === 'cash' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900' : 'bg-blue-50 text-blue-700 border border-blue-100 dark:bg-blue-950/20 dark:text-blue-400 dark:border-blue-900'}`}>
+                                {sale.paymentMethod}
+                              </span>
+                            </td>
+                            <td className="p-3 text-right font-bold text-slate-900 dark:text-slate-100 whitespace-nowrap">₹{sale.total.toFixed(2)}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan="6" className="p-8 text-center text-slate-500 font-semibold text-sm">No sales invoices found in this period.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           )}
 
 

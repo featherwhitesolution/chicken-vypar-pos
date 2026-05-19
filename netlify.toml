@@ -1,0 +1,27 @@
+# Netlify Configuration File
+# Highly optimized to save build credits and manage deployments efficiently.
+
+[build]
+  # The directory containing the build output
+  publish = "dist"
+
+  # The build command to compile the Vite React application
+  command = "npm run build"
+
+  # OPTIMIZE BUILD MINUTES:
+  # Only trigger a build if files in the essential frontend directories/files change.
+  #
+  # How this works:
+  # - git diff --quiet checks for differences between the last successful build ($CACHED_COMMIT_REF)
+  #   and the current commit ($COMMIT_REF) specifically in src/, public/, package.json, vite.config.js, index.html.
+  # - If no changes are found, it exits with 0. Netlify sees exit code 0 and automatically CANCELS/IGNORES the build.
+  # - If changes are found, it exits with 1. Netlify sees exit code 1 and builds normally.
+  #
+  # This saves huge amounts of build credits when you update Supabase schemas/migrations, README,
+  # or utility scripts like remove_bg.js!
+  ignore = "git diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- src/ public/ package.json vite.config.js index.html"
+
+[build.environment]
+  # Pin modern Node.js and npm versions for reliable and fast builds
+  NODE_VERSION = "20"
+  NPM_FLAGS = "--no-audit --no-fund"

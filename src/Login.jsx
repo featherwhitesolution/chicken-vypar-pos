@@ -3,17 +3,55 @@ import { Store, Tractor, Building2, User, Lock, ArrowRight, Shield } from 'lucid
 
 export default function Login({ onLogin }) {
   const [role, setRole] = useState('Retailer');
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('123456');
+  const [username, setUsername] = useState('9876543210');
+  const [password, setPassword] = useState('');
+  const [loginMethod, setLoginMethod] = useState('password'); // 'password' or 'otp'
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpValue, setOtpValue] = useState('');
+  const [isSendingOtp, setIsSendingOtp] = useState(false);
   
   const handleLogin = (e) => {
     e.preventDefault();
-    if (username === 'admin_farhan' && password === 'Farhans@27') {
-      onLogin({ username, role: 'developer_admin' });
-    } else if (username === 'admin' && password === '123456') {
-      onLogin({ username, role });
+    const normalizedUser = username.trim().replace(/\s+/g, '');
+
+    if (normalizedUser === 'admin_farhan' && password === 'Farhans@27') {
+      onLogin({ username: normalizedUser, role: 'developer_admin' });
+      return;
+    }
+
+    if (role === 'Retailer') {
+      if (loginMethod === 'otp') {
+        if (!otpSent) {
+          if (normalizedUser.length < 10) {
+            alert("Please enter a valid 10-digit mobile number.");
+            return;
+          }
+          setIsSendingOtp(true);
+          setTimeout(() => {
+            setIsSendingOtp(false);
+            setOtpSent(true);
+            alert("Demo OTP code '123456' sent to " + username);
+          }, 800);
+        } else {
+          if (otpValue === '123456') {
+            onLogin({ username: normalizedUser, role });
+          } else {
+            alert("Invalid OTP code. Please enter '123456' for verification.");
+          }
+        }
+      } else {
+        if (normalizedUser.length >= 10 && password === '123456') {
+          onLogin({ username: normalizedUser, role });
+        } else {
+          alert("Invalid Mobile Number or password. Please try again.");
+        }
+      }
     } else {
-      alert("Invalid username or password. Please try again.");
+      if (normalizedUser === 'admin' && password === '123456') {
+        onLogin({ username: normalizedUser, role });
+      } else {
+        alert("Invalid username or password. Please try again.");
+      }
     }
   };
 
@@ -47,7 +85,17 @@ export default function Login({ onLogin }) {
                 <button
                   key={r.id}
                   type="button"
-                  onClick={() => setRole(r.id)}
+                  onClick={() => {
+                    setRole(r.id);
+                    setLoginMethod('password');
+                    setOtpSent(false);
+                    setOtpValue('');
+                    if (r.id === 'Retailer') {
+                      setUsername('9876543210');
+                    } else {
+                      setUsername('');
+                    }
+                  }}
                   className={`flex-1 flex flex-col items-center justify-center py-3 rounded-lg text-sm font-medium transition-all duration-300 ${
                     role === r.id 
                       ? 'bg-white dark:bg-slate-900 text-primary-600 dark:text-primary-400 shadow-md transform scale-100 ring-1 ring-primary-500/20' 
@@ -62,43 +110,104 @@ export default function Login({ onLogin }) {
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Username</label>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  {role === 'Retailer' ? 'Mobile Number' : 'Username'}
+                </label>
                 <div className="relative group">
                   <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                     <User className="h-5 w-5 text-slate-400 group-focus-within:text-primary-500 transition-colors" />
                   </div>
                   <input
-                    type="text"
+                    type={role === 'Retailer' ? 'tel' : 'text'}
                     value={username}
+                    disabled={otpSent}
                     onChange={(e) => setUsername(e.target.value)}
-                    className="block w-full pl-11 pr-4 py-3 border border-slate-200 dark:border-slate-700 rounded-xl bg-white/70 dark:bg-slate-900/70 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all outline-none"
-                    placeholder="Enter username"
+                    className="block w-full pl-11 pr-4 py-3 border border-slate-200 dark:border-slate-700 rounded-xl bg-white/70 dark:bg-slate-900/70 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all outline-none disabled:opacity-60"
+                    placeholder={role === 'Retailer' ? 'Enter 10-digit Mobile Number' : 'Enter username'}
                   />
                 </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Password</label>
-                <div className="relative group">
-                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                    <Lock className="h-5 w-5 text-slate-400 group-focus-within:text-primary-500 transition-colors" />
+              {role === 'Retailer' && loginMethod === 'otp' ? (
+                otpSent && (
+                  <div className="animate-in slide-in-from-top duration-300">
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">OTP Code</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOtpSent(false);
+                          setOtpValue('');
+                        }}
+                        className="text-xs text-primary-600 dark:text-primary-400 font-semibold hover:underline"
+                      >
+                        Edit Mobile
+                      </button>
+                    </div>
+                    <div className="relative group">
+                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                        <Shield className="h-5 w-5 text-slate-400 group-focus-within:text-primary-500 transition-colors" />
+                      </div>
+                      <input
+                        type="text"
+                        maxLength="6"
+                        value={otpValue}
+                        onChange={(e) => setOtpValue(e.target.value.replace(/\D/g, ''))}
+                        className="block w-full pl-11 pr-4 py-3 border border-slate-200 dark:border-slate-700 rounded-xl bg-white/70 dark:bg-slate-900/70 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all outline-none font-bold text-center tracking-widest text-lg"
+                        placeholder="••••••"
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5 text-center">
+                      For testing, type the mock code <span className="font-bold text-primary-500">123456</span>
+                    </p>
                   </div>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="block w-full pl-11 pr-4 py-3 border border-slate-200 dark:border-slate-700 rounded-xl bg-white/70 dark:bg-slate-900/70 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all outline-none"
-                    placeholder="Enter password"
-                  />
+                )
+              ) : (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Password</label>
+                  <div className="relative group">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                      <Lock className="h-5 w-5 text-slate-400 group-focus-within:text-primary-500 transition-colors" />
+                    </div>
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="block w-full pl-11 pr-4 py-3 border border-slate-200 dark:border-slate-700 rounded-xl bg-white/70 dark:bg-slate-900/70 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all outline-none"
+                      placeholder="Enter password"
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
+
+            {role === 'Retailer' && (
+              <div className="flex justify-center pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginMethod(loginMethod === 'password' ? 'otp' : 'password');
+                    setOtpSent(false);
+                    setOtpValue('');
+                  }}
+                  className="text-xs text-primary-600 dark:text-primary-400 font-bold hover:underline tracking-wide transition-all"
+                >
+                  {loginMethod === 'password' ? '⚡ Sign in with OTP instead' : '🔑 Sign in with Password instead'}
+                </button>
+              </div>
+            )}
 
             <button
               type="submit"
               className="w-full flex justify-center items-center py-3.5 px-4 border border-transparent rounded-xl shadow-lg shadow-primary-500/30 text-base font-semibold text-white bg-gradient-to-r from-primary-600 to-primary-700 hover:from-primary-700 hover:to-primary-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 transition-all transform hover:-translate-y-0.5"
             >
-              Sign In to {role}
+              {isSendingOtp ? (
+                <span>Sending OTP...</span>
+              ) : role === 'Retailer' && loginMethod === 'otp' ? (
+                otpSent ? 'Verify & Sign In' : 'Send OTP Code'
+              ) : (
+                `Sign In to ${role}`
+              )}
               <ArrowRight className="ml-2 w-5 h-5" />
             </button>
           </form>

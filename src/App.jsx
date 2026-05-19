@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Store, ShoppingCart, LayoutDashboard, Settings, Package, History, LogOut, Menu, X, Tag, Truck, FileText, IndianRupee, User, MapPin, Phone, Hash, Check, Lock, Edit2, Sparkles } from 'lucide-react';
+import { Store, ShoppingCart, LayoutDashboard, Settings, Package, History, LogOut, Menu, X, Tag, Truck, FileText, IndianRupee, User, MapPin, Phone, Hash, Check, Lock, Edit2, Sparkles, CreditCard, Smartphone, Globe, RefreshCw, AlertCircle } from 'lucide-react';
 import Login from './Login';
 import BillingPOS from './BillingPOS';
 import DailyRates from './DailyRates';
@@ -26,7 +26,18 @@ function App() {
 
   const [shopInfo, setShopInfo] = useState(() => {
     const saved = localStorage.getItem('shopInfo');
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.customerUniqueId === 'MC-89324') {
+          parsed.customerUniqueId = 'CV-00001';
+          localStorage.setItem('shopInfo', JSON.stringify(parsed));
+        }
+        return parsed;
+      } catch (err) {
+        console.error("Error parsing shopInfo:", err);
+      }
+    }
     return {
       customerUniqueId: 'CV-00001',
       shopName: shopDetails.name,
@@ -39,12 +50,32 @@ function App() {
 
   const [shopStatus, setShopStatus] = useState(() => {
     const savedInfo = localStorage.getItem('shopInfo');
-    const shopId = savedInfo ? JSON.parse(savedInfo).customerUniqueId : 'CV-00001';
+    let shopId = 'CV-00001';
+    if (savedInfo) {
+      try {
+        const parsed = JSON.parse(savedInfo);
+        shopId = parsed.customerUniqueId === 'MC-89324' ? 'CV-00001' : parsed.customerUniqueId;
+      } catch (err) {
+        console.error("Error parsing savedInfo for shopStatus:", err);
+      }
+    }
     const savedShops = localStorage.getItem('crm_shops');
     if (savedShops) {
-      const shopsList = JSON.parse(savedShops);
-      const activeShop = shopsList.find(s => s.customerUniqueId === shopId);
-      if (activeShop) return activeShop;
+      try {
+        const shopsList = JSON.parse(savedShops);
+        const activeShop = shopsList.find(s => s.customerUniqueId === shopId);
+        if (activeShop) {
+          if (activeShop.customerUniqueId === 'CV-00001' && activeShop.status !== 'Active') {
+            activeShop.status = 'Active';
+            activeShop.deactivatedAt = '';
+            const updated = shopsList.map(s => s.customerUniqueId === 'CV-00001' ? { ...s, status: 'Active', deactivatedAt: '' } : s);
+            localStorage.setItem('crm_shops', JSON.stringify(updated));
+          }
+          return activeShop;
+        }
+      } catch (e) {
+        console.error("Error healing shopStatus from crm_shops:", e);
+      }
     }
     return {
       customerUniqueId: 'CV-00001',
@@ -66,7 +97,7 @@ function App() {
   };
 
   const trialDetails = getTrialDetails();
-  const isSuspended = shopStatus && shopStatus.status === 'Suspended';
+  const isSuspended = shopStatus && (shopStatus.status === 'Suspended' || shopStatus.status === 'Deactive');
 
   const [dashboardStats, setDashboardStats] = useState({
     stockAvailable: '0.00',
@@ -79,7 +110,7 @@ function App() {
 
   useEffect(() => {
     if (!user) return;
-    
+
     let stockList = [];
     let salesList = [];
     let mortalityList = [];
@@ -215,6 +246,37 @@ function App() {
     }
   }, [user]);
 
+  useEffect(() => {
+    if (user && user.role === 'Retailer' && user.username) {
+      const mobileInput = user.username.trim().replace(/\D/g, '');
+      const savedShops = localStorage.getItem('crm_shops');
+      if (savedShops) {
+        try {
+          const shopsList = JSON.parse(savedShops);
+          const matchedShop = shopsList.find(s => {
+            const cleanShopPhone = s.phone.replace(/\D/g, '');
+            return cleanShopPhone.endsWith(mobileInput) || mobileInput.endsWith(cleanShopPhone);
+          });
+          if (matchedShop) {
+            setShopStatus(matchedShop);
+            const newShopDetails = {
+              customerUniqueId: matchedShop.customerUniqueId,
+              shopName: matchedShop.shopName,
+              proprietorName: matchedShop.proprietorName,
+              address: matchedShop.address,
+              phone: matchedShop.phone,
+              gstin: matchedShop.gstin || '27AAAAA1111A1Z1'
+            };
+            setShopInfo(newShopDetails);
+            localStorage.setItem('shopInfo', JSON.stringify(newShopDetails));
+          }
+        } catch (e) {
+          console.error("Error setting dynamic shop context by phone:", e);
+        }
+      }
+    }
+  }, [user]);
+
   if (!user) {
     return <Login onLogin={(userData) => setUser(userData)} />;
   }
@@ -230,7 +292,7 @@ function App() {
           <div className="h-16 w-16 bg-red-500/10 text-red-550 rounded-2xl flex items-center justify-center mx-auto mb-6 border border-red-500/20 shadow-lg shadow-red-500/10">
             <Lock className="w-8 h-8 text-red-500" />
           </div>
-          <h2 className="text-2xl font-black text-white tracking-tight">Portal Suspended</h2>
+          <h2 className="text-2xl font-black text-white tracking-tight">Portal Deactivated</h2>
           <p className="text-slate-400 mt-3 text-sm leading-relaxed">
             Your Chicken Vypar store profile has been <span className="text-red-400 font-bold">suspended or deactivated</span>. All portal activity is currently disabled.
           </p>
@@ -364,8 +426,8 @@ function App() {
             <div className="bg-white dark:bg-slate-800 rounded-full px-4 py-2 shadow-sm border border-slate-200 dark:border-slate-700 text-sm font-medium">
               15 May, 2026
             </div>
-            <div className="h-10 w-10 rounded-full bg-primary-100 dark:bg-primary-900/50 flex items-center justify-center text-primary-600 dark:text-primary-400 font-bold border border-primary-200 dark:border-primary-800 shrink-0">
-              {user.username.charAt(0).toUpperCase()}
+            <div className="h-10 w-10 rounded-full bg-primary-100 dark:bg-primary-900/50 flex items-center justify-center border border-primary-200 dark:border-primary-800 shrink-0">
+              <User className="w-5 h-5 text-primary-600 dark:text-primary-400" />
             </div>
           </div>
         </header>
@@ -377,11 +439,11 @@ function App() {
               <StatCard title="Today's Sales" value={`₹ ${todaySales.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`} trend="Live" isPositive={true} />
               <StatCard title="Total Birds" value={dashboardStats.totalBirds} trend="Inward" isPositive={true} />
               <StatCard title="Stock Available" value={`${dashboardStats.stockAvailable} kg`} trend="Live" isPositive={true} />
-              <StatCard 
-                title="Avg. Purchase Rate" 
-                value={`₹ ${dashboardStats.averageRate}`} 
-                trend="Per kg" 
-                isPositive={true} 
+              <StatCard
+                title="Avg. Purchase Rate"
+                value={`₹ ${dashboardStats.averageRate}`}
+                trend="Per kg"
+                isPositive={true}
               />
             </div>
 
@@ -391,9 +453,9 @@ function App() {
                 <div className="text-left">
                   <h3 className="text-xl font-extrabold mb-2 tracking-tight text-slate-850 dark:text-white">Quick Actions</h3>
                   <p className="text-slate-500 dark:text-slate-400 text-sm mb-6">Frequently used tools to manage your chicken shop operations.</p>
-                  
+
                   <div className="grid grid-cols-2 gap-4">
-                    <button 
+                    <button
                       onClick={() => setActiveTab('pos')}
                       className="p-4 rounded-2xl bg-gradient-to-br from-blue-500/10 to-indigo-500/10 hover:from-blue-500/15 hover:to-indigo-500/15 border border-blue-500/20 text-left transition-all group cursor-pointer hover:scale-[1.02] active:scale-95"
                     >
@@ -402,7 +464,7 @@ function App() {
                       <span className="block text-slate-500 text-[11px] mt-0.5">Start a fresh customer sale</span>
                     </button>
 
-                    <button 
+                    <button
                       onClick={() => setActiveTab('stock')}
                       className="p-4 rounded-2xl bg-gradient-to-br from-emerald-500/10 to-teal-500/10 hover:from-emerald-500/15 hover:to-teal-500/15 border border-emerald-500/20 text-left transition-all group cursor-pointer hover:scale-[1.02] active:scale-95"
                     >
@@ -411,7 +473,7 @@ function App() {
                       <span className="block text-slate-500 text-[11px] mt-0.5">Log new bird batch delivery</span>
                     </button>
 
-                    <button 
+                    <button
                       onClick={() => setActiveTab('rates')}
                       className="p-4 rounded-2xl bg-gradient-to-br from-amber-500/10 to-orange-500/10 hover:from-amber-500/15 hover:to-orange-500/15 border border-amber-500/20 text-left transition-all group cursor-pointer hover:scale-[1.02] active:scale-95"
                     >
@@ -420,7 +482,7 @@ function App() {
                       <span className="block text-slate-500 text-[11px] mt-0.5">Update live bird prices</span>
                     </button>
 
-                    <button 
+                    <button
                       onClick={() => setActiveTab('reports')}
                       className="p-4 rounded-2xl bg-gradient-to-br from-rose-500/10 to-pink-500/10 hover:from-rose-500/15 hover:to-pink-500/15 border border-rose-500/20 text-left transition-all group cursor-pointer hover:scale-[1.02] active:scale-95"
                     >
@@ -436,7 +498,6 @@ function App() {
                     <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
                     <span className="text-xs font-bold text-slate-500 dark:text-slate-400">All Systems Operational</span>
                   </div>
-                  <span className="text-[10px] uppercase font-black text-slate-400 tracking-wider">Momin Chicken POS v1.3</span>
                 </div>
               </div>
 
@@ -510,7 +571,7 @@ function App() {
         )}
 
         {activeTab === 'settings' && (
-          <SettingsPanel />
+          <SettingsPanel shopStatus={shopStatus} setShopStatus={setShopStatus} />
         )}
       </main>
     </div>
@@ -558,7 +619,7 @@ function StatCard({ title, value, trend, isPositive, subtext }) {
   );
 }
 
-function SettingsPanel() {
+function SettingsPanel({ shopStatus, setShopStatus }) {
   const [shopInfo, setShopInfo] = useState(() => {
     const saved = localStorage.getItem('shopInfo');
     if (saved) return JSON.parse(saved);
@@ -576,6 +637,24 @@ function SettingsPanel() {
   const [isEditing, setIsEditing] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
+  // Razorpay simulation states
+  const [showRazorpay, setShowRazorpay] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState(shopStatus?.subscriptionPlan || 'Monthly');
+  const [paymentStep, setPaymentStep] = useState('plan'); // 'plan', 'method', 'processing', 'success'
+  const [selectedMethod, setSelectedMethod] = useState(''); // 'upi', 'card', 'netbanking'
+  const [upiId, setUpiId] = useState('');
+  const [cardNumber, setCardNumber] = useState('');
+  const [cardExpiry, setCardExpiry] = useState('');
+  const [cardCvv, setCardCvv] = useState('');
+  const [paymentError, setPaymentError] = useState('');
+
+  const plans = [
+    { id: 'Monthly', name: 'Monthly Plan', price: 500, period: '1 Month' },
+    { id: 'Quarterly', name: 'Quarterly Plan', price: 1500, period: '3 Months' },
+    { id: 'Half-Yearly', name: 'Half-Yearly Plan', price: 3000, period: '6 Months' },
+    { id: 'Yearly', name: 'Yearly Plan', price: 6000, period: '1 Year' }
+  ];
+
   const handleSave = (e) => {
     e.preventDefault();
     localStorage.setItem('shopInfo', JSON.stringify(shopInfo));
@@ -583,7 +662,6 @@ function SettingsPanel() {
     setIsEditing(false);
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);
-    // Reload window after 1.5 seconds to sync settings globally
     setTimeout(() => {
       window.location.reload();
     }, 1500);
@@ -594,32 +672,224 @@ function SettingsPanel() {
     setIsEditing(false);
   };
 
-  // Determine if there are actual changes made to the editable fields
+  const calculateRenewalDate = (startDateStr, plan) => {
+    if (!startDateStr) return 'N/A';
+    const start = new Date(startDateStr);
+    if (isNaN(start.getTime())) return 'N/A';
+    
+    const end = new Date(start);
+    if (plan === 'Quarterly') {
+      end.setMonth(end.getMonth() + 3);
+    } else if (plan === 'Half-Yearly') {
+      end.setMonth(end.getMonth() + 6);
+    } else if (plan === 'Yearly') {
+      end.setFullYear(end.getFullYear() + 1);
+    } else {
+      end.setMonth(end.getMonth() + 1);
+    }
+    
+    const day = String(end.getDate()).padStart(2, '0');
+    const month = String(end.getMonth() + 1).padStart(2, '0');
+    const year = end.getFullYear();
+    return `${day}-${month}-${year}`;
+  };
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return 'N/A';
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return 'N/A';
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}-${month}-${year}`;
+  };
+
+  const loadRazorpayScript = () => {
+    return new Promise((resolve) => {
+      if (window.Razorpay) {
+        resolve(true);
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.async = true;
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
+  const handleProceedToPay = () => {
+    setPaymentError('');
+    setPaymentStep('method');
+  };
+
+  const processSuccessPayment = (planId) => {
+    setShowRazorpay(true);
+    setPaymentStep('processing');
+    setTimeout(() => {
+      setPaymentStep('success');
+      const todayStr = new Date().toISOString().split('T')[0];
+
+      const updatedStatus = {
+        ...shopStatus,
+        status: 'Active',
+        subscriptionPlan: planId,
+        subscriptionStartedAt: todayStr,
+        deactivatedAt: ''
+      };
+      setShopStatus(updatedStatus);
+
+      const savedShops = localStorage.getItem('crm_shops');
+      if (savedShops) {
+        try {
+          const shopsList = JSON.parse(savedShops);
+          const updatedShopsList = shopsList.map(s => 
+            s.customerUniqueId === shopInfo.customerUniqueId 
+              ? { 
+                  ...s, 
+                  status: 'Active', 
+                  subscriptionPlan: planId, 
+                  subscriptionStartedAt: todayStr, 
+                  deactivatedAt: '' 
+                }
+              : s
+          );
+          localStorage.setItem('crm_shops', JSON.stringify(updatedShopsList));
+        } catch (e) {
+          console.error("Error updating crm_shops after payment:", e);
+        }
+      }
+
+      setTimeout(() => {
+        setShowRazorpay(false);
+        setPaymentStep('plan');
+      }, 2500);
+    }, 1500);
+  };
+
+  const handlePaymentSubmit = (e) => {
+    e.preventDefault();
+    if (selectedMethod === 'upi' && !upiId.includes('@')) {
+      setPaymentError('Please enter a valid UPI ID (e.g. user@okhdfcbank)');
+      return;
+    }
+    if (selectedMethod === 'card') {
+      if (cardNumber.replace(/\s/g, '').length < 16) {
+        setPaymentError('Please enter a valid 16-digit card number');
+        return;
+      }
+      if (!cardExpiry.includes('/')) {
+        setPaymentError('Please enter expiry date (MM/YY)');
+        return;
+      }
+      if (cardCvv.length < 3) {
+        setPaymentError('Please enter a 3-digit CVV');
+        return;
+      }
+    }
+    setPaymentError('');
+    processSuccessPayment(selectedPlan);
+  };
+
+  const selectedPlanPrice = plans.find(p => p.id === selectedPlan)?.price || 500;
   const hasChanges = shopInfo.phone !== originalShopInfo.phone || shopInfo.address !== originalShopInfo.address;
 
   return (
-    <div className="max-w-4xl space-y-6 animate-in fade-in duration-300 text-left">
-      <div className="text-left flex justify-between items-end">
-        <div>
-          <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight">Shop Settings</h2>
-          <p className="text-slate-500 dark:text-slate-400 mt-1">Manage shop profile, proprietor name, contact number, and GSTIN.</p>
+    <div className="max-w-4xl space-y-8 animate-in fade-in duration-300 text-left pb-16">
+      
+      {/* Subscription Card */}
+      <div className="glass-panel p-6 md:p-8 rounded-3xl border border-slate-200/60 dark:border-slate-800 shadow-2xl relative overflow-hidden bg-white dark:bg-slate-900/50">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-indigo-500/10 to-purple-500/10 rounded-full blur-3xl pointer-events-none"></div>
+        
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6 text-left">
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="p-1.5 bg-indigo-50 dark:bg-indigo-950/40 rounded-lg text-indigo-600 dark:text-indigo-400">
+                <CreditCard className="w-5 h-5" />
+              </span>
+              <h3 className="text-xl font-bold text-slate-800 dark:text-white">Subscription & Billing</h3>
+            </div>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Manage your Chicken Vypar license, renew your plan, or view next renewal date.
+            </p>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-100 dark:border-slate-800">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Plan Status</span>
+                <span className={`inline-flex items-center text-xs font-bold px-2.5 py-0.5 rounded-full mt-1 ${
+                  shopStatus?.status === 'Active'
+                    ? 'bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-400 border border-green-200 dark:border-green-900'
+                    : shopStatus?.status === 'Trial'
+                    ? 'bg-blue-100 text-blue-700 dark:bg-blue-955/30 dark:text-blue-400 border border-blue-200 dark:border-blue-900'
+                    : 'bg-rose-100 text-rose-700 dark:bg-rose-955/30 dark:text-rose-400 border border-rose-200 dark:border-rose-900'
+                }`}>
+                  {shopStatus?.status || 'Trial'}
+                </span>
+              </div>
+
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-100 dark:border-slate-800">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Current Plan</span>
+                <span className="text-sm font-bold text-slate-800 dark:text-white block mt-1">
+                  {shopStatus?.subscriptionPlan || 'Monthly'}
+                </span>
+              </div>
+
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-100 dark:border-slate-800">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Started On</span>
+                <span className="text-sm font-bold text-slate-800 dark:text-white block mt-1">
+                  {formatDate(shopStatus?.subscriptionStartedAt || shopStatus?.registeredAt)}
+                </span>
+              </div>
+
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-100 dark:border-slate-800">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Next Renewal</span>
+                <span className="text-sm font-bold text-slate-800 dark:text-white block mt-1">
+                  {calculateRenewalDate(shopStatus?.subscriptionStartedAt || shopStatus?.registeredAt, shopStatus?.subscriptionPlan)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="shrink-0 flex flex-col justify-center">
+            <button
+              onClick={() => {
+                setShowRazorpay(true);
+                setPaymentStep('plan');
+              }}
+              className="px-6 py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-sm rounded-2xl shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2 transition-all transform hover:scale-[1.03] active:scale-95 cursor-pointer"
+            >
+              <IndianRupee className="w-4 h-4" />
+              Pay / Renew Subscription
+            </button>
+            <div className="flex items-center justify-center gap-1 mt-2 text-[10px] text-slate-400 font-semibold">
+              <Lock className="w-3 h-3" /> Secured by Razorpay Gateway
+            </div>
+          </div>
         </div>
-        {!isEditing && (
-          <button
-            onClick={() => setIsEditing(true)}
-            className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-1.5 transition-all cursor-pointer transform hover:scale-105 active:scale-95"
-          >
-            <Edit2 className="w-3.5 h-3.5" /> Enable Edit
-          </button>
-        )}
       </div>
 
+      {/* Shop Profile Card */}
       <div className="glass-panel p-8 rounded-3xl border border-slate-200/60 dark:border-slate-800 shadow-2xl relative overflow-hidden bg-white dark:bg-slate-900/50">
         <div className="absolute top-0 right-0 w-48 h-48 bg-gradient-to-br from-blue-500/10 to-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
 
+        <div className="text-left flex justify-between items-center mb-6">
+          <div>
+            <h3 className="text-lg font-bold text-slate-800 dark:text-white">Shop Profile</h3>
+            <p className="text-xs text-slate-500">Edit your contact details and store address.</p>
+          </div>
+          {!isEditing && (
+            <button
+              onClick={() => setIsEditing(true)}
+              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+            >
+              <Edit2 className="w-3.5 h-3.5" /> Enable Edit
+            </button>
+          )}
+        </div>
+
         <form onSubmit={handleSave} className="space-y-6 relative z-10 text-left">
-          
-          {/* Customer Unique ID - Sleek Non-editable Card Header */}
+          {/* Customer Unique ID */}
           <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200/50 dark:border-slate-800 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center text-white shadow-md">
@@ -630,11 +900,10 @@ function SettingsPanel() {
                 <span className="block font-mono text-sm font-black text-slate-950 dark:text-white mt-0.5">{shopInfo.customerUniqueId}</span>
               </div>
             </div>
-            <span className="text-[10px] text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 px-2.5 py-1 rounded-full font-bold uppercase tracking-wider border border-blue-100 dark:border-blue-900">Verified Client</span>
+            <span className="text-[10px] text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-955/30 px-2.5 py-1 rounded-full font-bold uppercase tracking-wider border border-blue-100 dark:border-blue-900">Verified Client</span>
           </div>
 
-          <div className="space-y-6">
-            
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Shop Name */}
             <div className="space-y-2">
               <label className="text-xs font-black uppercase text-slate-900 dark:text-slate-200 tracking-wider flex items-center justify-between">
@@ -642,7 +911,7 @@ function SettingsPanel() {
                   <Store className="w-4 h-4 text-blue-500" />
                   Shop Name
                 </span>
-                <span className="flex items-center gap-1 text-[9px] text-amber-500 bg-amber-50 dark:bg-amber-950/20 px-1.5 py-0.5 rounded font-black tracking-widest border border-amber-200/50 uppercase">
+                <span className="flex items-center gap-1 text-[9px] text-amber-500 bg-amber-50 dark:bg-amber-955/20 px-1.5 py-0.5 rounded font-black tracking-widest border border-amber-200/50 uppercase">
                   <Lock className="w-2.5 h-2.5" /> Locked
                 </span>
               </label>
@@ -661,7 +930,7 @@ function SettingsPanel() {
                   <User className="w-4 h-4 text-indigo-500" />
                   Proprietor Name
                 </span>
-                <span className="flex items-center gap-1 text-[9px] text-amber-500 bg-amber-50 dark:bg-amber-950/20 px-1.5 py-0.5 rounded font-black tracking-widest border border-amber-200/50 uppercase">
+                <span className="flex items-center gap-1 text-[9px] text-amber-500 bg-amber-50 dark:bg-amber-955/20 px-1.5 py-0.5 rounded font-black tracking-widest border border-amber-200/50 uppercase">
                   <Lock className="w-2.5 h-2.5" /> Locked
                 </span>
               </label>
@@ -669,7 +938,7 @@ function SettingsPanel() {
                 type="text"
                 value={shopInfo.proprietorName}
                 readOnly
-                className="w-full p-3 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-750 rounded-xl outline-none font-bold text-slate-950 dark:text-white cursor-not-allowed"
+                className="w-full p-3 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-755 rounded-xl outline-none font-bold text-slate-950 dark:text-white cursor-not-allowed"
               />
             </div>
 
@@ -690,11 +959,10 @@ function SettingsPanel() {
                 onChange={(e) => setShopInfo({ ...shopInfo, phone: e.target.value })}
                 required
                 readOnly={!isEditing}
-                className={`w-full p-3 border rounded-xl outline-none font-bold transition-all ${
-                  isEditing 
-                    ? 'bg-slate-50 dark:bg-slate-800 border-emerald-500/30 text-slate-950 dark:text-white focus:ring-2 focus:ring-emerald-500' 
+                className={`w-full p-3 border rounded-xl outline-none font-bold transition-all ${isEditing
+                    ? 'bg-slate-50 dark:bg-slate-800 border-emerald-500/30 text-slate-955 dark:text-white focus:ring-2 focus:ring-emerald-500'
                     : 'bg-slate-100/50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 text-slate-950 dark:text-white cursor-not-allowed'
-                }`}
+                  }`}
               />
             </div>
 
@@ -705,7 +973,7 @@ function SettingsPanel() {
                   <Hash className="w-4 h-4 text-rose-500" />
                   GSTIN Number
                 </span>
-                <span className="flex items-center gap-1 text-[9px] text-amber-500 bg-amber-50 dark:bg-amber-950/20 px-1.5 py-0.5 rounded font-black tracking-widest border border-amber-200/50 uppercase">
+                <span className="flex items-center gap-1 text-[9px] text-amber-500 bg-amber-50 dark:bg-amber-955/20 px-1.5 py-0.5 rounded font-black tracking-widest border border-amber-200/50 uppercase">
                   <Lock className="w-2.5 h-2.5" /> Locked
                 </span>
               </label>
@@ -716,7 +984,6 @@ function SettingsPanel() {
                 className="w-full p-3 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-750 rounded-xl outline-none font-bold text-slate-950 dark:text-white cursor-not-allowed uppercase"
               />
             </div>
-
           </div>
 
           {/* Address */}
@@ -734,13 +1001,12 @@ function SettingsPanel() {
               value={shopInfo.address}
               onChange={(e) => setShopInfo({ ...shopInfo, address: e.target.value })}
               required
-              rows="3"
+              rows="2"
               readOnly={!isEditing}
-              className={`w-full p-3 border rounded-xl outline-none font-bold transition-all ${
-                isEditing 
-                  ? 'bg-slate-50 dark:bg-slate-800 border-amber-500/30 text-slate-950 dark:text-white focus:ring-2 focus:ring-amber-500' 
+              className={`w-full p-3 border rounded-xl outline-none font-bold transition-all ${isEditing
+                  ? 'bg-slate-50 dark:bg-slate-800 border-amber-500/30 text-slate-950 dark:text-white focus:ring-2 focus:ring-amber-500'
                   : 'bg-slate-100/50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 text-slate-950 dark:text-white cursor-not-allowed'
-              }`}
+                }`}
             />
           </div>
 
@@ -751,13 +1017,13 @@ function SettingsPanel() {
                 <Check className="w-4 h-4" /> Settings Saved! Reloading to sync...
               </div>
             ) : isEditing ? (
-              <div className="flex items-center gap-1.5 text-xs text-amber-500 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/20 px-2.5 py-1.5 rounded-lg border border-amber-200/30 font-semibold">
+              <div className="flex items-center gap-1.5 text-xs text-amber-500 dark:text-amber-400 bg-amber-50 dark:bg-amber-955/20 px-2.5 py-1.5 rounded-lg border border-amber-200/30 font-semibold">
                 <Sparkles className="w-3.5 h-3.5" /> Modify Contact or Address to save
               </div>
             ) : (
               <div className="text-xs text-slate-400 font-medium">Click "Enable Edit" in top-right to start making changes.</div>
             )}
-            
+
             {isEditing && (
               <div className="flex items-center gap-3">
                 <button
@@ -778,9 +1044,346 @@ function SettingsPanel() {
               </div>
             )}
           </div>
-
         </form>
       </div>
+
+      {/* RAZORPAY GATEWAY MODAL SIMULATOR */}
+      {showRazorpay && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className={`w-full max-w-md rounded-2xl overflow-hidden shadow-2xl flex flex-col animate-in zoom-in-95 duration-200 font-sans transition-all duration-500 ${
+            paymentStep === 'success' 
+              ? 'bg-[#19b889] text-white border-transparent' 
+              : paymentStep === 'processing'
+              ? 'bg-[#f8f9fa] text-slate-800 border-transparent min-h-[380px]'
+              : 'bg-[#0b1a30] text-white border border-blue-900/45'
+          }`}>
+            
+            {/* Razorpay Modal Header */}
+            {paymentStep !== 'success' && paymentStep !== 'processing' && (
+              <div className="p-5 border-b border-blue-900/30 bg-[#0d213d] flex items-center justify-between text-left">
+                <div className="flex items-center gap-3">
+                  <div className="h-8 w-8 bg-blue-600 rounded-lg flex items-center justify-center font-black text-white tracking-widest text-sm shadow-md">
+                    CV
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm text-slate-100">Chicken Vypar POS</h4>
+                    <p className="text-[10px] text-blue-400 font-semibold tracking-wide">License Renewal</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowRazorpay(false)} 
+                  className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            )}
+
+            {/* Content Container */}
+            <div className="p-6 flex-1 overflow-y-auto max-h-[75vh] text-left">
+              {paymentStep === 'plan' && (
+                <div className="space-y-5 animate-in fade-in duration-200">
+                  <div className="text-center">
+                    <span className="text-xs font-bold text-blue-400 tracking-wider uppercase block mb-1">Select Subscription Plan</span>
+                    <h3 className="text-lg font-bold text-slate-100">Choose your renewal period</h3>
+                  </div>
+
+                  <div className="space-y-3">
+                    {plans.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => setSelectedPlan(p.id)}
+                        className={`w-full p-4 rounded-xl border transition-all flex items-center justify-between text-left cursor-pointer ${
+                          selectedPlan === p.id
+                            ? 'bg-blue-600/10 border-blue-500 shadow-md ring-1 ring-blue-500/20'
+                            : 'bg-[#0f2445] border-blue-900/50 hover:border-blue-700/50 hover:bg-[#122b52]'
+                        }`}
+                      >
+                        <div>
+                          <span className="font-bold text-slate-100 text-sm block">{p.name}</span>
+                          <span className="text-xs text-blue-400 font-semibold mt-0.5 block">Validity: {p.period}</span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-lg font-black text-white block">₹{p.price}</span>
+                          <span className="text-[9px] text-slate-400 block font-semibold">Inclusive of all taxes</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={handleProceedToPay}
+                    className="w-full py-3.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm rounded-xl shadow-lg shadow-blue-500/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer mt-4"
+                  >
+                    Proceed to Pay ₹{selectedPlanPrice}
+                  </button>
+                </div>
+              )}
+
+              {paymentStep === 'method' && (
+                <div className="space-y-5 animate-in slide-in-from-right duration-250">
+                  <div className="flex items-center gap-2 pb-3 border-b border-blue-900/30">
+                    <button 
+                      onClick={() => setPaymentStep('plan')} 
+                      className="text-xs font-semibold text-blue-400 hover:underline cursor-pointer"
+                    >
+                      ← Back to Plans
+                    </button>
+                    <span className="text-slate-500">|</span>
+                    <span className="text-xs text-slate-300 font-bold">Paying ₹{selectedPlanPrice}</span>
+                  </div>
+
+                  <div className="space-y-4">
+                    <span className="text-xs font-bold text-slate-400 block text-left">Select Payment Method</span>
+                    
+                    {/* Method Option: UPI */}
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => { setSelectedMethod('upi'); setPaymentError(''); }}
+                        className={`w-full p-4 rounded-xl border transition-all flex items-center gap-3 cursor-pointer ${
+                          selectedMethod === 'upi'
+                            ? 'bg-blue-600/10 border-blue-500'
+                            : 'bg-[#0f2445] border-blue-900/50 hover:bg-[#122b52]'
+                        }`}
+                      >
+                        <Smartphone className="w-5 h-5 text-blue-400" />
+                        <div className="text-left">
+                          <span className="font-bold text-sm text-slate-100 block">UPI (GPay / PhonePe / Paytm)</span>
+                          <span className="text-[10px] text-slate-400 block">Pay via Instant UPI ID</span>
+                        </div>
+                      </button>
+                      
+                      {selectedMethod === 'upi' && (
+                        <div className="p-3 bg-[#0d213d] rounded-xl border border-blue-900/40 space-y-2 animate-in slide-in-from-top duration-200">
+                          <input
+                            type="text"
+                            placeholder="Enter UPI ID (e.g. momin@okhdfcbank)"
+                            value={upiId}
+                            onChange={(e) => setUpiId(e.target.value)}
+                            className="w-full p-2.5 bg-[#0b1a30] border border-blue-900 rounded-lg text-sm text-white focus:outline-none focus:border-blue-500 font-mono"
+                          />
+                          <p className="text-[10px] text-slate-400">Use any test UPI ID for demo</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Method Option: Card */}
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => { setSelectedMethod('card'); setPaymentError(''); }}
+                        className={`w-full p-4 rounded-xl border transition-all flex items-center gap-3 cursor-pointer ${
+                          selectedMethod === 'card'
+                            ? 'bg-blue-600/10 border-blue-500'
+                            : 'bg-[#0f2445] border-blue-900/50 hover:bg-[#122b52]'
+                        }`}
+                      >
+                        <CreditCard className="w-5 h-5 text-blue-400" />
+                        <div className="text-left">
+                          <span className="font-bold text-sm text-slate-100 block">Credit / Debit Cards</span>
+                          <span className="text-[10px] text-slate-400 block">Visa, MasterCard, RuPay, Maestro</span>
+                        </div>
+                      </button>
+                      
+                      {selectedMethod === 'card' && (
+                        <div className="p-4 bg-[#0d213d] rounded-xl border border-blue-900/40 space-y-3 animate-in slide-in-from-top duration-200">
+                          <input
+                            type="text"
+                            maxLength="19"
+                            placeholder="Card Number (e.g. 4111 2222 3333 4444)"
+                            value={cardNumber}
+                            onChange={(e) => setCardNumber(e.target.value.replace(/\s?/g, '').replace(/(\d{4})/g, '$1 ').trim())}
+                            className="w-full p-2.5 bg-[#0b1a30] border border-blue-900 rounded-lg text-sm text-white focus:outline-none focus:border-blue-500 font-mono"
+                          />
+                          <div className="grid grid-cols-2 gap-3">
+                            <input
+                              type="text"
+                              maxLength="5"
+                              placeholder="Expiry (MM/YY)"
+                              value={cardExpiry}
+                              onChange={(e) => setCardExpiry(e.target.value)}
+                              className="w-full p-2.5 bg-[#0b1a30] border border-blue-900 rounded-lg text-sm text-white focus:outline-none focus:border-blue-500 font-mono"
+                            />
+                            <input
+                              type="password"
+                              maxLength="3"
+                              placeholder="CVV"
+                              value={cardCvv}
+                              onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, ''))}
+                              className="w-full p-2.5 bg-[#0b1a30] border border-blue-900 rounded-lg text-sm text-white focus:outline-none focus:border-blue-500 font-mono"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Method Option: Netbanking */}
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => { setSelectedMethod('netbanking'); setPaymentError(''); }}
+                        className={`w-full p-4 rounded-xl border transition-all flex items-center gap-3 cursor-pointer ${
+                          selectedMethod === 'netbanking'
+                            ? 'bg-blue-600/10 border-blue-500'
+                            : 'bg-[#0f2445] border-blue-900/50 hover:bg-[#122b52]'
+                        }`}
+                      >
+                        <Globe className="w-5 h-5 text-blue-400" />
+                        <div className="text-left">
+                          <span className="font-bold text-sm text-slate-100 block">Netbanking</span>
+                          <span className="text-[10px] text-slate-400 block">All major Indian banks supported</span>
+                        </div>
+                      </button>
+                      
+                      {selectedMethod === 'netbanking' && (
+                        <div className="p-3 bg-[#0d213d] rounded-xl border border-blue-900/40 animate-in slide-in-from-top duration-200">
+                          <select className="w-full p-2.5 bg-[#0b1a30] border border-blue-900 rounded-lg text-sm text-white focus:outline-none focus:border-blue-500">
+                            <option value="sbi">State Bank of India</option>
+                            <option value="hdfc">HDFC Bank</option>
+                            <option value="icici">ICICI Bank</option>
+                            <option value="axis">Axis Bank</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {paymentError && (
+                    <div className="flex items-center gap-2 text-rose-400 bg-rose-955/20 p-3 rounded-lg border border-rose-900/30 text-xs font-semibold animate-shake">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span>{paymentError}</span>
+                    </div>
+                  )}
+
+                  {selectedMethod && (
+                    <button
+                      onClick={handlePaymentSubmit}
+                      className="w-full py-3.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm rounded-xl shadow-lg shadow-blue-500/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer mt-4"
+                    >
+                      Pay ₹{selectedPlanPrice} Securely
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {paymentStep === 'processing' && (
+                <div className="flex-1 flex flex-col items-center justify-center min-h-[300px] relative animate-in fade-in duration-300">
+                  <div className="relative w-40 h-40 flex items-center justify-center scale-90">
+                    {/* Pulsing blue outer ring */}
+                    <div className="absolute inset-0 rounded-full border-4 border-blue-500/10 scale-110 animate-pulse"></div>
+                    
+                    {/* Rotating Blue Progress Ring */}
+                    <div className="absolute inset-0 rounded-full border-4 border-slate-200/40 border-t-blue-600 animate-spin"></div>
+                    
+                    {/* Glossy 3D Shield SVG */}
+                    <svg className="w-20 h-24 drop-shadow-xl animate-pulse" viewBox="0 0 100 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <defs>
+                        <linearGradient id="shield-grad-glow" x1="10%" y1="10%" x2="90%" y2="90%">
+                          <stop offset="0%" stopColor="#3b82f6" />
+                          <stop offset="50%" stopColor="#1d4ed8" />
+                          <stop offset="100%" stopColor="#1e3a8a" />
+                        </linearGradient>
+                        <filter id="glow-filter" x="-20%" y="-20%" width="140%" height="140%">
+                          <feGaussianBlur stdDeviation="3" result="blur" />
+                          <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                        </filter>
+                      </defs>
+                      <path 
+                        d="M50 15 
+                           C75 15, 85 20, 85 45 
+                           C85 75, 70 95, 50 105 
+                           C30 95, 15 75, 15 45 
+                           C15 20, 25 15, 50 15 Z" 
+                        fill="url(#shield-grad-glow)" 
+                        filter="url(#glow-filter)"
+                      />
+                    </svg>
+                  </div>
+                  
+                  {/* Secured by Razorpay Logo Footer */}
+                  <div className="absolute bottom-4 left-0 right-0 flex items-center justify-center gap-1">
+                    <span className="text-[10px] text-slate-400 font-semibold tracking-wide">Secured by</span>
+                    <svg className="h-3 w-5 fill-blue-600 self-center" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M15 2 L2 18 L7 18 L18 2 Z" />
+                    </svg>
+                    <span className="font-sans font-black italic text-slate-700 text-xs tracking-tighter">Razorpay</span>
+                  </div>
+                </div>
+              )}
+
+              {paymentStep === 'success' && (
+                <div className="py-12 flex flex-col items-center justify-center space-y-5 animate-in zoom-in-95 duration-300">
+                  <style>{`
+                    @keyframes rzp-stroke {
+                      100% { stroke-dashoffset: 0; }
+                    }
+                    @keyframes rzp-scale {
+                      0%, 100% { transform: none; }
+                      50% { transform: scale3d(1.15, 1.15, 1); }
+                    }
+                    @keyframes rzp-fill {
+                      100% { box-shadow: inset 0px 0px 0px 40px #ffffff; }
+                    }
+                    .rzp-circle {
+                      stroke-dasharray: 166;
+                      stroke-dashoffset: 166;
+                      stroke-width: 4;
+                      stroke-miterlimit: 10;
+                      stroke: #ffffff;
+                      fill: none;
+                      animation: rzp-stroke 0.6s cubic-bezier(0.65, 0, 0.45, 1) forwards;
+                    }
+                    .rzp-check-icon {
+                      width: 72px;
+                      height: 72px;
+                      border-radius: 50%;
+                      display: block;
+                      stroke-width: 4;
+                      stroke: #19b889;
+                      stroke-miterlimit: 10;
+                      box-shadow: inset 0px 0px 0px #ffffff;
+                      animation: rzp-fill .4s ease-in-out .4s forwards, rzp-scale .3s ease-in-out .9s both;
+                    }
+                    .rzp-check-path {
+                      transform-origin: 50% 50%;
+                      stroke-dasharray: 48;
+                      stroke-dashoffset: 48;
+                      animation: rzp-stroke 0.3s cubic-bezier(0.65, 0, 0.45, 1) 0.8s forwards;
+                    }
+                  `}</style>
+                  
+                  <div className="flex items-center justify-center">
+                    <svg className="rzp-check-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
+                      <circle className="rzp-circle" cx="26" cy="26" r="25" fill="none" />
+                      <path className="rzp-check-path" fill="none" d="M14.1 27.2l7.1 7.2 16.7-16.8" />
+                    </svg>
+                  </div>
+                  
+                  <div className="text-center space-y-1">
+                    <h4 className="font-black text-white text-xl tracking-tight">Payment Successful</h4>
+                    <p className="text-xs text-emerald-100 font-semibold opacity-90">Your license has been activated and updated.</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Razorpay Footer */}
+            {paymentStep !== 'success' && (
+              <div className="p-4 bg-[#071324] border-t border-blue-900/30 flex items-center justify-between text-[10px] text-slate-400 font-semibold px-6">
+                <span className="flex items-center gap-1">
+                  🛡️ PCI-DSS Compliant
+                </span>
+                <span className="flex items-center gap-1 uppercase tracking-wider text-slate-500 font-black">
+                  Razorpay Secure
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

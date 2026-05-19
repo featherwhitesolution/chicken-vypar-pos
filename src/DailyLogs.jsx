@@ -10,7 +10,7 @@ import { shopDetails } from './data';
 export default function DailyLogs() {
   const savedShop = localStorage.getItem('shopInfo');
   const activeShop = savedShop ? JSON.parse(savedShop) : {
-    customerUniqueId: 'MC-89324',
+    customerUniqueId: 'CV-00001',
     shopName: shopDetails.name,
     proprietorName: 'Mohammad Farooq Momin',
     address: shopDetails.address,
