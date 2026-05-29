@@ -14,6 +14,7 @@ import WholesaleDashboard from './WholesaleDashboard';
 import WholesalePOS from './WholesalePOS';
 import CrateLedger from './CrateLedger';
 import WholesaleCollections from './WholesaleCollections';
+import WholesaleReports from './WholesaleReports';
 import TruckDispatch from './TruckDispatch';
 import { ClipboardList } from 'lucide-react';
 import { initialProducts, shopDetails } from './data';
@@ -287,7 +288,7 @@ function App() {
       if (user.role === 'Wholesaler') {
         setAppMode('wholesale');
         setActiveTab(prev => {
-          const wholesaleTabs = ['wholesale_dashboard', 'wholesale_customers', 'wholesale_pos', 'farm_inward', 'crate_ledger', 'wholesale_collections', 'settings'];
+          const wholesaleTabs = ['wholesale_dashboard', 'wholesale_customers', 'wholesale_pos', 'farm_inward', 'crate_ledger', 'wholesale_collections', 'wholesale_reports', 'truck_dispatch', 'settings'];
           return wholesaleTabs.includes(prev) ? prev : 'wholesale_dashboard';
         });
       } else if (user.role === 'Retailer') {
@@ -522,6 +523,7 @@ function App() {
               <NavItem mode={appMode} icon={<Truck />} label="Farm Inwards" active={activeTab === 'farm_inward'} onClick={() => { setActiveTab('farm_inward'); setIsMobileMenuOpen(false); }} />
               <NavItem mode={appMode} icon={<Package />} label="Crate Ledger" active={activeTab === 'crate_ledger'} onClick={() => { setActiveTab('crate_ledger'); setIsMobileMenuOpen(false); }} />
               <NavItem mode={appMode} icon={<FileText />} label="Collections" active={activeTab === 'wholesale_collections'} onClick={() => { setActiveTab('wholesale_collections'); setIsMobileMenuOpen(false); }} />
+              <NavItem mode={appMode} icon={<FileText />} label="Reports" active={activeTab === 'wholesale_reports'} onClick={() => { setActiveTab('wholesale_reports'); setIsMobileMenuOpen(false); }} />
             </>
           )}
         </nav>
@@ -584,8 +586,11 @@ function App() {
                 Retail Live
               </span>
             )}
-            <div className="bg-white dark:bg-slate-800 rounded-full px-4 py-2 shadow-sm border border-slate-200 dark:border-slate-700 text-sm font-medium">
-              15 May, 2026
+            <div className="bg-white dark:bg-slate-800 rounded-full px-4 py-2 shadow-sm border border-slate-200 dark:border-slate-700 text-sm font-bold tracking-wide">
+              {(() => {
+                const d = new Date();
+                return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+              })()}
             </div>
             <div className={`h-10 w-10 rounded-full flex items-center justify-center border shrink-0 ${
               appMode === 'wholesale'
@@ -764,6 +769,10 @@ function App() {
 
         {activeTab === 'wholesale_collections' && (
           <WholesaleCollections />
+        )}
+
+        {activeTab === 'wholesale_reports' && (
+          <WholesaleReports />
         )}
 
         {activeTab === 'settings' && (

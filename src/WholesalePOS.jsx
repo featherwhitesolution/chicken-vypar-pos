@@ -25,11 +25,12 @@ export default function WholesalePOS({ products = [] }) {
     birdsCount: '',
     grossWeight: '',
     cratesCount: '',
-    crateTare: '2.5'
+    crateTare: '2.5',
+    chickenType: 'BR'
   });
   
   // Eggs Form
-  const [eggsForm, setEggsForm] = useState({ quantity: '' });
+  const [eggsForm, setEggsForm] = useState({ quantity: '', crates: '' });
 
   // Invoice Crates Ledger Flow
   const [cratesIssued, setCratesIssued] = useState(0);
@@ -113,7 +114,8 @@ export default function WholesalePOS({ products = [] }) {
 
     const item = {
       productId: 1,
-      name: 'Live Chicken',
+      name: `Live Chicken (${chickenForm.chickenType})`,
+      chickenType: chickenForm.chickenType,
       birdsCount: parseInt(chickenForm.birdsCount),
       grossWeight: gross,
       cratesCount: crates,
@@ -132,7 +134,8 @@ export default function WholesalePOS({ products = [] }) {
       birdsCount: '',
       grossWeight: '',
       cratesCount: '',
-      crateTare: '2.5'
+      crateTare: '2.5',
+      chickenType: 'BR'
     });
   };
 
@@ -160,7 +163,7 @@ export default function WholesalePOS({ products = [] }) {
     };
 
     setCart([...cart.filter(c => c.productId !== 16), item]);
-    setEggsForm({ quantity: '' });
+    setEggsForm({ quantity: '', crates: '' });
   };
 
   const handleRemoveItem = (id) => {
@@ -341,7 +344,20 @@ export default function WholesalePOS({ products = [] }) {
             </h3>
             
             <form onSubmit={handleAddChicken} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Breed</label>
+                  <select
+                    value={chickenForm.chickenType}
+                    onChange={e => setChickenForm({ ...chickenForm, chickenType: e.target.value })}
+                    className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-sm font-bold text-slate-850 dark:text-white"
+                  >
+                    <option value="BR">Broiler (BR)</option>
+                    <option value="P">Poultry (P)</option>
+                    <option value="D">Desi (D)</option>
+                  </select>
+                </div>
+
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Gross Weight (kg)</label>
                   <input
@@ -421,11 +437,35 @@ export default function WholesalePOS({ products = [] }) {
             
             <form onSubmit={handleAddEggs} className="flex flex-col sm:flex-row items-end gap-4">
               <div className="flex-1 space-y-1 text-left w-full">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Crates (30 pcs/crate)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={eggsForm.crates}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setEggsForm({ 
+                      crates: val, 
+                      quantity: val ? String(Math.round(val * 30)) : ''
+                    });
+                  }}
+                  className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-sm font-semibold"
+                  placeholder="e.g. 10"
+                />
+              </div>
+
+              <div className="flex-1 space-y-1 text-left w-full">
                 <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Egg count (pcs)</label>
                 <input
                   type="number"
                   value={eggsForm.quantity}
-                  onChange={e => setEggsForm({ quantity: e.target.value })}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setEggsForm({ 
+                      quantity: val, 
+                      crates: val ? String(Number((val / 30).toFixed(2))) : ''
+                    });
+                  }}
                   className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-sm font-semibold"
                   placeholder="e.g. 300"
                 />
@@ -692,4 +732,3 @@ export default function WholesalePOS({ products = [] }) {
     </div>
   );
 }
-                                                                                                  
