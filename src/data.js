@@ -24,4 +24,5 @@ export const initialProducts = [
   { id: 13, name: 'Neck + Back', category: 'Cuts', rate: 140, unit: 'kg', image: '/cuts/neck.jpg', emoji: '🦴' },
   { id: 14, name: 'Leg Quarter', category: 'Cuts', rate: 250, unit: 'kg', image: '/cuts/leg quarter.jpg', emoji: '🍖' },
   { id: 15, name: 'Feet / Panja', category: 'Offal', rate: 80, unit: 'kg', image: '/cuts/panja.jpg', emoji: '🐾' },
+  { id: 16, name: 'Eggs', category: 'Eggs', rate: 6, unit: 'pc', image: '/cuts/Eggs.png?v=2', emoji: '🥚' },
 ];

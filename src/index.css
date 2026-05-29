@@ -153,3 +153,24 @@
     font-size: 11px;
   }
 }
+
+/* Wholesale Mode Custom Themes */
+.wholesale-mode .glass-panel {
+  background: rgba(240, 253, 250, 0.75);
+  border: 1px solid rgba(52, 211, 153, 0.25);
+  box-shadow: 0 8px 32px 0 rgba(4, 120, 87, 0.05);
+}
+
+.wholesale-mode .dark .glass-panel {
+  background: rgba(6, 78, 59, 0.22);
+  border: 1px solid rgba(16, 185, 129, 0.15);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+}
+
+.wholesale-mode .text-gradient {
+  background-image: linear-gradient(to right, #059669, #0d9488);
+}
+
+.wholesale-mode .dark .text-gradient {
+  background-image: linear-gradient(to right, #34d399, #2dd4bf);
+}

@@ -39,6 +39,7 @@ export default function SupplierPayments() {
     date: today,
     amount: '',
     paymentMode: 'Cash',
+    purchaseType: 'Chicken',
     referenceNo: '',
     bankName: '',
     notes: ''
@@ -75,6 +76,7 @@ export default function SupplierPayments() {
         paymentDate: formData.date,
         amount: parseFloat(formData.amount),
         paymentMode: formData.paymentMode,
+        purchaseType: formData.purchaseType,
         referenceNo: needsBankDetails ? formData.referenceNo : null,
         bankName: needsBankDetails ? formData.bankName : null,
         notes: formData.notes,
@@ -92,6 +94,7 @@ export default function SupplierPayments() {
           date: today,
           amount: '',
           paymentMode: 'Cash',
+          purchaseType: 'Chicken',
           referenceNo: '',
           bankName: '',
           notes: ''
@@ -202,6 +205,40 @@ export default function SupplierPayments() {
                   className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 text-xl font-bold text-green-600 dark:text-green-400"
                   required
                 />
+              </div>
+            </div>
+
+            {/* Payment Category */}
+            <div className="space-y-2 col-span-1 md:col-span-2">
+              <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+                <Banknote className="w-4 h-4" />
+                Payment Category / Type
+              </label>
+              <div className="grid grid-cols-2 gap-4">
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, purchaseType: 'Chicken' })}
+                  className={`px-4 py-3.5 rounded-xl border text-center font-black transition-all flex items-center justify-center gap-2 ${
+                    formData.purchaseType === 'Chicken'
+                      ? 'border-green-600 bg-green-50 dark:bg-green-900/20 ring-2 ring-green-500 text-green-700 dark:text-green-400 scale-[1.02]'
+                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-850 hover:border-slate-300 text-slate-650 dark:text-slate-300'
+                  }`}
+                >
+                  <span className="text-lg">🐔</span>
+                  <span>Chicken Payment</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, purchaseType: 'Eggs' })}
+                  className={`px-4 py-3.5 rounded-xl border text-center font-black transition-all flex items-center justify-center gap-2 ${
+                    formData.purchaseType === 'Eggs'
+                      ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20 ring-2 ring-amber-500 text-amber-700 dark:text-amber-400 scale-[1.02]'
+                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-850 hover:border-slate-300 text-slate-650 dark:text-slate-300'
+                  }`}
+                >
+                  <span className="text-lg">🥚</span>
+                  <span>Eggs Payment</span>
+                </button>
               </div>
             </div>
 

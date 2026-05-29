@@ -15,7 +15,8 @@ const initialSuppliers = [
 const chickenTypes = [
   { id: 'BR', name: 'Broiler (BR)', badge: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
   { id: 'P', name: 'Poultry (P)', badge: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' },
-  { id: 'D', name: 'Desi (D)', badge: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' }
+  { id: 'D', name: 'Desi (D)', badge: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' },
+  { id: 'EG', name: 'Eggs (EG)', badge: 'bg-yellow-100 text-yellow-750 dark:bg-yellow-900/30 dark:text-yellow-450' }
 ];
 
 const paymentModes = [
@@ -59,6 +60,30 @@ export default function StockInward() {
   const filteredSuppliers = useMemo(() => {
     return suppliers.filter(s => s.name.toLowerCase().includes(searchQuery.toLowerCase()));
   }, [suppliers, searchQuery]);
+
+  const handleChickenTypeChange = (type) => {
+    const updated = { ...formData, chickenType: type };
+    if (type === 'EG') {
+      const trays = parseFloat(formData.numberOfBirds);
+      if (!isNaN(trays) && trays >= 0) {
+        updated.weight = String(trays * 30);
+      }
+    }
+    setFormData(updated);
+  };
+
+  const handleNumberOfBirdsChange = (val) => {
+    const updated = { ...formData, numberOfBirds: val };
+    if (formData.chickenType === 'EG') {
+      const trays = parseFloat(val);
+      if (!isNaN(trays) && trays >= 0) {
+        updated.weight = String(trays * 30);
+      } else {
+        updated.weight = '';
+      }
+    }
+    setFormData(updated);
+  };
 
   const handleAddSupplier = () => {
     if (newSupplierName.trim()) {
@@ -268,7 +293,7 @@ export default function StockInward() {
                   <button
                     key={type.id}
                     type="button"
-                    onClick={() => setFormData({ ...formData, chickenType: type.id })}
+                    onClick={() => handleChickenTypeChange(type.id)}
                     className={`px-2 py-3 rounded-xl border text-center transition-all ${
                       formData.chickenType === type.id
                         ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 ring-1 ring-primary-500'
@@ -282,41 +307,43 @@ export default function StockInward() {
               </div>
             </div>
 
-            {/* Number of Chicken */}
+            {/* Number of Chicken / Trates */}
             <div className="space-y-2">
               <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
                 <Hash className="w-4 h-4" />
-                Number of Chicken
+                {formData.chickenType === 'EG' ? 'Number of Trays / Crates' : 'Number of Chicken'}
               </label>
               <input
                 type="number"
                 min="1"
                 placeholder="0"
                 value={formData.numberOfBirds}
-                onChange={(e) => setFormData({ ...formData, numberOfBirds: e.target.value })}
+                onChange={(e) => handleNumberOfBirdsChange(e.target.value)}
                 className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-lg font-semibold"
                 required
               />
             </div>
 
-            {/* Total Weight */}
+            {/* Total Weight / Total Eggs */}
             <div className="space-y-2">
               <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
                 <Scale className="w-4 h-4" />
-                Total Weight (kg)
+                {formData.chickenType === 'EG' ? 'Total Eggs (Pcs)' : 'Total Weight (kg)'}
               </label>
               <div className="relative">
                 <input
                   type="number"
                   min="0"
-                  step="0.01"
-                  placeholder="0.00"
+                  step={formData.chickenType === 'EG' ? '1' : '0.01'}
+                  placeholder={formData.chickenType === 'EG' ? '0' : '0.00'}
                   value={formData.weight}
                   onChange={(e) => setFormData({ ...formData, weight: e.target.value })}
                   className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-lg pr-12 font-semibold"
                   required
                 />
-                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 font-medium">kg</span>
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 font-medium">
+                  {formData.chickenType === 'EG' ? 'Pcs' : 'kg'}
+                </span>
               </div>
             </div>
 
@@ -324,7 +351,7 @@ export default function StockInward() {
             <div className="space-y-2">
               <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
                 <IndianRupee className="w-4 h-4" />
-                Rate of Purchase (per kg)
+                {formData.chickenType === 'EG' ? 'Rate of Purchase (per Egg)' : 'Rate of Purchase (per kg)'}
               </label>
               <div className="relative">
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-medium">₹</span>

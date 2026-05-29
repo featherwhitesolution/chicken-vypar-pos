@@ -38,6 +38,7 @@ export default function Reports() {
   };
   const [reportType, setReportType] = useState('outstanding_balances');
   const [selectedSupplier, setSelectedSupplier] = useState('ALL');
+  const [ledgerCategory, setLedgerCategory] = useState('ALL'); // 'ALL', 'CHICKEN', 'EGGS'
   const [dailyViewMode, setDailyViewMode] = useState('summary'); // 'summary' or 'details'
   
   // Date filters
@@ -123,43 +124,88 @@ export default function Reports() {
 
     let summary = {};
     initialSuppliers.forEach(s => {
-      summary[s.id] = { name: s.name, opening: 0, newBills: 0, moneyPaid: 0, netDue: 0 };
+      summary[s.id] = { 
+        name: s.name, 
+        opening: 0, 
+        newBills: 0, 
+        moneyPaid: 0, 
+        netDue: 0,
+        chicken: { opening: 0, newBills: 0, moneyPaid: 0, netDue: 0 },
+        eggs: { opening: 0, newBills: 0, moneyPaid: 0, netDue: 0 }
+      };
     });
 
     // We must process ALL inward records to find true outstanding
     stockInwards.forEach(item => {
       const sId = item.supplierId;
-      if (!summary[sId]) summary[sId] = { name: item.supplierName, opening: 0, newBills: 0, moneyPaid: 0, netDue: 0 };
+      if (!summary[sId]) {
+        summary[sId] = { 
+          name: item.supplierName, 
+          opening: 0, 
+          newBills: 0, 
+          moneyPaid: 0, 
+          netDue: 0,
+          chicken: { opening: 0, newBills: 0, moneyPaid: 0, netDue: 0 },
+          eggs: { opening: 0, newBills: 0, moneyPaid: 0, netDue: 0 }
+        };
+      }
       
       const itemDate = item.timestamp ? item.timestamp.toDate() : new Date();
       const amount = item.totalValue || 0;
+      const isEgg = item.chickenType === 'EG';
 
       if (isDateBefore(itemDate, from)) {
         summary[sId].opening += amount;
+        if (isEgg) summary[sId].eggs.opening += amount;
+        else summary[sId].chicken.opening += amount;
       } else if (isDateInRange(itemDate, from, to)) {
         summary[sId].newBills += amount;
+        if (isEgg) summary[sId].eggs.newBills += amount;
+        else summary[sId].chicken.newBills += amount;
       }
       summary[sId].netDue += amount;
+      if (isEgg) summary[sId].eggs.netDue += amount;
+      else summary[sId].chicken.netDue += amount;
     });
 
     // Process all payments
     supplierPayments.forEach(item => {
       const sId = item.supplierId;
-      if (!summary[sId]) summary[sId] = { name: item.supplierName, opening: 0, newBills: 0, moneyPaid: 0, netDue: 0 };
+      if (!summary[sId]) {
+        summary[sId] = { 
+          name: item.supplierName, 
+          opening: 0, 
+          newBills: 0, 
+          moneyPaid: 0, 
+          netDue: 0,
+          chicken: { opening: 0, newBills: 0, moneyPaid: 0, netDue: 0 },
+          eggs: { opening: 0, newBills: 0, moneyPaid: 0, netDue: 0 }
+        };
+      }
       
       const itemDate = item.timestamp ? item.timestamp.toDate() : new Date(item.paymentDate);
       const amount = item.amount || 0;
+      const isEgg = item.purchaseType === 'Eggs';
 
       if (isDateBefore(itemDate, from)) {
         summary[sId].opening -= amount;
+        if (isEgg) summary[sId].eggs.opening -= amount;
+        else summary[sId].chicken.opening -= amount;
       } else if (isDateInRange(itemDate, from, to)) {
         summary[sId].moneyPaid += amount;
+        if (isEgg) summary[sId].eggs.moneyPaid += amount;
+        else summary[sId].chicken.moneyPaid += amount;
       }
       summary[sId].netDue -= amount;
+      if (isEgg) summary[sId].eggs.netDue -= amount;
+      else summary[sId].chicken.netDue -= amount;
     });
 
     // Convert to array and filter out true 0s to keep it clean (optional, but good for UX)
-    return Object.values(summary).filter(s => Math.abs(s.opening) > 0 || s.newBills > 0 || s.moneyPaid > 0 || Math.abs(s.netDue) > 0);
+    return Object.values(summary).filter(s => 
+      Math.abs(s.opening) > 0 || s.newBills > 0 || s.moneyPaid > 0 || Math.abs(s.netDue) > 0 ||
+      Math.abs(s.chicken.netDue) > 0 || Math.abs(s.eggs.netDue) > 0
+    );
   };
 
   // -------------------------------------------------------------
@@ -173,11 +219,31 @@ export default function Reports() {
     let purchases = [];
     let payments = [];
 
+    let chickenOpening = 0;
+    let eggsOpening = 0;
+    let chickenPurchaseAmt = 0;
+    let eggsPurchaseAmt = 0;
+    let chickenPaymentAmt = 0;
+    let eggsPaymentAmt = 0;
+
     // Filter Inwards for this supplier
     stockInwards.filter(i => selectedSupplier === 'ALL' || i.supplierId === parseInt(selectedSupplier)).forEach(item => {
       const itemDate = item.timestamp ? item.timestamp.toDate() : new Date();
       const amount = item.totalValue || 0;
+      const isEgg = item.chickenType === 'EG';
       
+      if (isDateBefore(itemDate, from)) {
+        if (isEgg) eggsOpening += amount;
+        else chickenOpening += amount;
+      } else if (isDateInRange(itemDate, from, to)) {
+        if (isEgg) eggsPurchaseAmt += amount;
+        else chickenPurchaseAmt += amount;
+      }
+
+      // Filter by category
+      if (ledgerCategory === 'CHICKEN' && isEgg) return;
+      if (ledgerCategory === 'EGGS' && !isEgg) return;
+
       if (isDateBefore(itemDate, from)) {
         openingBalance += amount;
       } else if (isDateInRange(itemDate, from, to)) {
@@ -198,11 +264,27 @@ export default function Reports() {
     supplierPayments.filter(i => selectedSupplier === 'ALL' || i.supplierId === parseInt(selectedSupplier)).forEach(item => {
       const itemDate = item.timestamp ? item.timestamp.toDate() : new Date(item.paymentDate);
       const amount = item.amount || 0;
+      const isEgg = item.purchaseType === 'Eggs';
+
+      if (isDateBefore(itemDate, from)) {
+        if (isEgg) eggsOpening -= amount;
+        else chickenOpening -= amount;
+      } else if (isDateInRange(itemDate, from, to)) {
+        if (isEgg) eggsPaymentAmt += amount;
+        else chickenPaymentAmt += amount;
+      }
+
+      // Filter by category
+      if (ledgerCategory === 'CHICKEN' && isEgg) return;
+      if (ledgerCategory === 'EGGS' && !isEgg) return;
       
       if (isDateBefore(itemDate, from)) {
         openingBalance -= amount;
       } else if (isDateInRange(itemDate, from, to)) {
         let particulars = item.paymentMode || 'CASH A/C';
+        if (ledgerCategory === 'ALL') {
+          particulars += ` (${item.purchaseType || 'Chicken'})`;
+        }
         if (item.paymentMode === 'Cheque') particulars += ` (${item.bankName?.split(' ')[0]} #${item.referenceNo})`;
         if (item.paymentMode === 'Bank Transfer') particulars += ` (Ref: ${item.referenceNo})`;
         
@@ -227,6 +309,8 @@ export default function Reports() {
     const totalCollectionAmount = payments.reduce((sum, p) => sum + p.amount, 0);
     
     const closingBalance = openingBalance + totalPurchaseAmount - totalCollectionAmount;
+    const chickenBalance = chickenOpening + chickenPurchaseAmt - chickenPaymentAmt;
+    const eggsBalance = eggsOpening + eggsPurchaseAmt - eggsPaymentAmt;
 
     return {
       openingBalance,
@@ -236,7 +320,9 @@ export default function Reports() {
       totalPurchaseWeight,
       totalPurchaseAmount,
       totalCollectionAmount,
-      closingBalance
+      closingBalance,
+      chickenBalance,
+      eggsBalance
     };
   };
 
@@ -427,23 +513,48 @@ export default function Reports() {
       doc.text('Outstanding Balances (Summary)', 14, 41);
       doc.setFontSize(10); doc.setTextColor(100); doc.text(`As on Date: ${formatDate(toDate)}`, 14, 47);
 
-      const tableColumn = ["Supplier", "Previous Due", "New Bills", "Money Paid", "Net Due Now"];
-      const tableRows = outstandingData.map(s => [
-        s.name, s.opening.toFixed(2), s.newBills.toFixed(2), s.moneyPaid.toFixed(2), 
-        `${s.netDue >= 0 ? '' : 'Adv '}${Math.abs(s.netDue).toFixed(2)}`
-      ]);
+      const tableColumn = ["Supplier / Category", "Previous Due", "New Bills", "Money Paid", "Net Due Now"];
+      const tableRows = [];
+      outstandingData.forEach(s => {
+        tableRows.push([
+          s.name, 
+          s.opening.toFixed(0), 
+          s.newBills.toFixed(0), 
+          s.moneyPaid.toFixed(0), 
+          `${s.netDue >= 0 ? '' : 'Adv '}${Math.abs(s.netDue).toFixed(0)}`
+        ]);
+        if (s.chicken.opening !== 0 || s.chicken.newBills !== 0 || s.chicken.moneyPaid !== 0 || s.chicken.netDue !== 0) {
+          tableRows.push([
+            "  ↳ 🐔 Chicken Credit", 
+            s.chicken.opening.toFixed(0), 
+            s.chicken.newBills.toFixed(0), 
+            s.chicken.moneyPaid.toFixed(0), 
+            `${s.chicken.netDue >= 0 ? '' : 'Adv '}${Math.abs(s.chicken.netDue).toFixed(0)}`
+          ]);
+        }
+        if (s.eggs.opening !== 0 || s.eggs.newBills !== 0 || s.eggs.moneyPaid !== 0 || s.eggs.netDue !== 0) {
+          tableRows.push([
+            "  ↳ 🥚 Eggs Credit", 
+            s.eggs.opening.toFixed(0), 
+            s.eggs.newBills.toFixed(0), 
+            s.eggs.moneyPaid.toFixed(0), 
+            `${s.eggs.netDue >= 0 ? '' : 'Adv '}${Math.abs(s.eggs.netDue).toFixed(0)}`
+          ]);
+        }
+      });
       
-      tableRows.push(['TOTAL', '-', '-', '-', `${totalOutstandingDue >= 0 ? '' : 'Adv '}${Math.abs(totalOutstandingDue).toFixed(2)}`]);
+      tableRows.push(['TOTAL', '-', '-', '-', `${totalOutstandingDue >= 0 ? '' : 'Adv '}${Math.abs(totalOutstandingDue).toFixed(0)}`]);
 
       autoTable(doc, { head: [tableColumn], body: tableRows, startY: 53, theme: 'grid', styles: { fontSize: 9 }, headStyles: { fillColor: [244, 63, 94] }});
     } 
     else if (reportType === 'supplier_ledger') {
       const supplierName = selectedSupplier === 'ALL' ? 'Consolidated (All Suppliers)' : (initialSuppliers.find(s => s.id === parseInt(selectedSupplier))?.name || 'Unknown');
-      doc.text(`Party Name: ${supplierName}`, 14, 41);
+      const categoryLabel = ledgerCategory === 'CHICKEN' ? ' [CHICKEN ONLY]' : ledgerCategory === 'EGGS' ? ' [EGGS ONLY]' : '';
+      doc.text(`Party Name: ${supplierName}${categoryLabel}`, 14, 41);
       doc.setFontSize(10); doc.setTextColor(100); doc.text(`Period: ${formatDate(fromDate)} to ${formatDate(toDate)}`, 14, 47);
 
       // Left Table: Purchase for the Week
-      const leftCol = ["Date", "Qty", "Details", "KGs.", "Rate", "Amount"];
+      const leftCol = ["Date", "Qty", "Details", "KGs/Pcs", "Rate", "Amount"];
       const leftRows = ledgerData.purchases.map(p => [
         formatDate(p.date), p.qty || '-', p.details, p.weight ? p.weight.toFixed(2) : '-', p.rate || '-', p.amount.toFixed(0)
       ]);
@@ -484,9 +595,10 @@ export default function Reports() {
       const finalY = Math.max(doc.lastAutoTable.finalY || 100, 100);
 
       // Add Reconciliation Box below
+      const showBreakdown = ledgerCategory === 'ALL';
       doc.setFontSize(10);
       doc.setTextColor(50);
-      doc.rect(14, finalY + 10, 100, 35);
+      doc.rect(14, finalY + 10, 100, showBreakdown ? 45 : 35);
       doc.text("ACCOUNT RECONCILIATION", 18, finalY + 15);
       doc.setFontSize(8);
       doc.text(`PREVIOUS BALANCE:`, 18, finalY + 22);
@@ -500,6 +612,14 @@ export default function Reports() {
       doc.setFont("helvetica", "bold");
       doc.text(`FINAL TOTAL PAYABLE:`, 18, finalY + 40);
       doc.text(`₹${ledgerData.closingBalance.toFixed(0)}`, 85, finalY + 40, { align: 'right' });
+      if (showBreakdown) {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7.5);
+        doc.text(`🐔 Chicken Balance:`, 18, finalY + 44);
+        doc.text(`₹${ledgerData.chickenBalance.toFixed(0)}`, 85, finalY + 44, { align: 'right' });
+        doc.text(`🥚 Eggs Balance:`, 18, finalY + 48);
+        doc.text(`₹${ledgerData.eggsBalance.toFixed(0)}`, 85, finalY + 48, { align: 'right' });
+      }
 
       // Note
       doc.setFont("helvetica", "italic");
@@ -544,7 +664,7 @@ export default function Reports() {
       doc.text('Stock Inward Report', 14, 41);
       doc.setFontSize(10); doc.setTextColor(100); doc.text(`Period: ${formatDate(fromDate)} to ${formatDate(toDate)}`, 14, 47);
 
-      const tableColumn = ["Date", "Supplier", "Type", "Vehicle", "Birds", "Weight (kg)", "Rate/kg", "Payment", "Total Value"];
+      const tableColumn = ["Date", "Supplier", "Type", "Vehicle", "Birds/Pcs", "Weight/Qty", "Rate/Unit", "Payment", "Total Value"];
       const tableRows = rawData.map(item => [
         item.timestamp ? formatDate(item.timestamp.toDate()) : 'N/A',
         item.supplierName || 'N/A', item.chickenType || 'N/A', item.vehicleNo || 'N/A',
@@ -564,9 +684,15 @@ export default function Reports() {
     let wsData = [];
     
     if (reportType === 'outstanding_balances') {
-      wsData.push(["Supplier", "Previous Due", "New Bills", "Money Paid", "Net Due Now"]);
+      wsData.push(["Supplier / Category", "Previous Due", "New Bills", "Money Paid", "Net Due Now"]);
       outstandingData.forEach(s => {
         wsData.push([s.name, s.opening, s.newBills, s.moneyPaid, s.netDue]);
+        if (s.chicken.opening !== 0 || s.chicken.newBills !== 0 || s.chicken.moneyPaid !== 0 || s.chicken.netDue !== 0) {
+          wsData.push(["  ↳ Chicken Credit", s.chicken.opening, s.chicken.newBills, s.chicken.moneyPaid, s.chicken.netDue]);
+        }
+        if (s.eggs.opening !== 0 || s.eggs.newBills !== 0 || s.eggs.moneyPaid !== 0 || s.eggs.netDue !== 0) {
+          wsData.push(["  ↳ Eggs Credit", s.eggs.opening, s.eggs.newBills, s.eggs.moneyPaid, s.eggs.netDue]);
+        }
       });
       wsData.push(['TOTAL', '', '', '', totalOutstandingDue]);
     } 
@@ -603,6 +729,10 @@ export default function Reports() {
       wsData.push(["ADD PURCHASE FOR THE WEEK", ledgerData.totalPurchaseAmount]);
       wsData.push(["LESS PAYMENT MADE", ledgerData.totalCollectionAmount]);
       wsData.push(["FINAL TOTAL PAYABLE", ledgerData.closingBalance]);
+      if (ledgerCategory === 'ALL') {
+        wsData.push(["Chicken Balance", ledgerData.chickenBalance]);
+        wsData.push(["Eggs Balance", ledgerData.eggsBalance]);
+      }
       wsData.push([]);
       wsData.push(["NOTE : BALANCE PAYABLE"]);
     }
@@ -627,7 +757,7 @@ export default function Reports() {
       ]);
     }
     else {
-      wsData.push(["Date", "Supplier", "Type", "Vehicle", "Birds", "Weight (kg)", "Rate/kg", "Payment", "Total Value"]);
+      wsData.push(["Date", "Supplier", "Type", "Vehicle", "Birds/Pcs", "Weight/Qty", "Rate/Unit", "Payment", "Total Value"]);
       rawData.forEach(item => {
         wsData.push([
           item.timestamp ? formatDate(item.timestamp.toDate()) : 'N/A',
@@ -671,17 +801,31 @@ export default function Reports() {
               </div>
 
               {reportType === 'supplier_ledger' && (
-                <div className="w-full md:w-48 animate-in fade-in">
-                  <label className="block text-sm font-medium text-slate-500 mb-1">Select Supplier</label>
-                  <select 
-                    className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none"
-                    value={selectedSupplier}
-                    onChange={(e) => setSelectedSupplier(e.target.value)}
-                  >
-                    <option value="ALL" className="font-bold">-- Consolidated (All Suppliers) --</option>
-                    {initialSuppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </div>
+                <>
+                  <div className="w-full md:w-48 animate-in fade-in">
+                    <label className="block text-sm font-medium text-slate-500 mb-1">Select Supplier</label>
+                    <select 
+                      className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none"
+                      value={selectedSupplier}
+                      onChange={(e) => setSelectedSupplier(e.target.value)}
+                    >
+                      <option value="ALL" className="font-bold">-- Consolidated (All Suppliers) --</option>
+                      {initialSuppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="w-full md:w-48 animate-in fade-in">
+                    <label className="block text-sm font-medium text-slate-500 mb-1">Category Filter</label>
+                    <select 
+                      className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none font-bold text-slate-700 dark:text-slate-250"
+                      value={ledgerCategory}
+                      onChange={(e) => setLedgerCategory(e.target.value)}
+                    >
+                      <option value="ALL">All Categories</option>
+                      <option value="CHICKEN">🐔 Chicken Only</option>
+                      <option value="EGGS">🥚 Eggs Only</option>
+                    </select>
+                  </div>
+                </>
               )}
 
               <div>
@@ -751,16 +895,44 @@ export default function Reports() {
               </thead>
               <tbody className="divide-y divide-slate-100 print:divide-slate-300">
                 {outstandingData.map(s => (
-                  <tr key={s.name} className="hover:bg-slate-50">
-                    <td className="p-4 font-medium">{s.name}</td>
-                    <td className="p-4 text-right text-slate-500">{s.opening.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-                    <td className="p-4 text-right text-red-500">{s.newBills > 0 ? s.newBills.toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '-'}</td>
-                    <td className="p-4 text-right text-green-500">{s.moneyPaid > 0 ? s.moneyPaid.toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '-'}</td>
-                    <td className={`p-4 text-right font-bold text-lg ${s.netDue > 0 ? 'text-red-600' : s.netDue < 0 ? 'text-green-600' : 'text-slate-800'}`}>
-                      {s.netDue > 0 ? `₹${s.netDue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : 
-                       s.netDue < 0 ? `Advance: ₹${Math.abs(s.netDue).toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : 'Settled'}
-                    </td>
-                  </tr>
+                  <React.Fragment key={s.name}>
+                    <tr className="hover:bg-slate-50 font-bold bg-slate-50/10 dark:bg-slate-800/10 border-b border-slate-200 dark:border-slate-800">
+                      <td className="p-4 font-bold text-slate-900 dark:text-slate-100">{s.name}</td>
+                      <td className="p-4 text-right text-slate-500 dark:text-slate-400">{s.opening.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                      <td className="p-4 text-right text-red-500 dark:text-red-400">{s.newBills > 0 ? s.newBills.toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '-'}</td>
+                      <td className="p-4 text-right text-green-500 dark:text-green-400">{s.moneyPaid > 0 ? s.moneyPaid.toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '-'}</td>
+                      <td className={`p-4 text-right font-black text-lg ${s.netDue > 0 ? 'text-red-600 dark:text-red-400' : s.netDue < 0 ? 'text-green-600 dark:text-green-455' : 'text-slate-800 dark:text-slate-200'}`}>
+                        {s.netDue > 0 ? `₹${s.netDue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : 
+                         s.netDue < 0 ? `Advance: ₹${Math.abs(s.netDue).toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : 'Settled'}
+                      </td>
+                    </tr>
+                    {/* Chicken sub-row */}
+                    {(s.chicken.opening !== 0 || s.chicken.newBills !== 0 || s.chicken.moneyPaid !== 0 || s.chicken.netDue !== 0) && (
+                      <tr className="bg-slate-50/20 text-xs dark:bg-slate-900/10 text-slate-500 dark:text-slate-400 hover:bg-slate-50/40">
+                        <td className="pl-8 p-2 font-medium">🐔 Chicken Credit</td>
+                        <td className="p-2 text-right">{s.chicken.opening.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                        <td className="p-2 text-right text-red-500/80">{s.chicken.newBills > 0 ? s.chicken.newBills.toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '-'}</td>
+                        <td className="p-2 text-right text-green-500/80">{s.chicken.moneyPaid > 0 ? s.chicken.moneyPaid.toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '-'}</td>
+                        <td className={`p-2 text-right font-bold ${s.chicken.netDue > 0 ? 'text-red-500' : s.chicken.netDue < 0 ? 'text-green-505' : 'text-slate-500'}`}>
+                          {s.chicken.netDue > 0 ? `₹${s.chicken.netDue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : 
+                           s.chicken.netDue < 0 ? `Adv: ₹${Math.abs(s.chicken.netDue).toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : 'Settled'}
+                        </td>
+                      </tr>
+                    )}
+                    {/* Eggs sub-row */}
+                    {(s.eggs.opening !== 0 || s.eggs.newBills !== 0 || s.eggs.moneyPaid !== 0 || s.eggs.netDue !== 0) && (
+                      <tr className="bg-slate-50/20 text-xs dark:bg-slate-900/10 text-slate-500 dark:text-slate-400 hover:bg-slate-50/40">
+                        <td className="pl-8 p-2 font-medium">🥚 Eggs Credit</td>
+                        <td className="p-2 text-right">{s.eggs.opening.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                        <td className="p-2 text-right text-red-500/80">{s.eggs.newBills > 0 ? s.eggs.newBills.toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '-'}</td>
+                        <td className="p-2 text-right text-green-500/80">{s.eggs.moneyPaid > 0 ? s.eggs.moneyPaid.toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '-'}</td>
+                        <td className={`p-2 text-right font-bold ${s.eggs.netDue > 0 ? 'text-red-500' : s.eggs.netDue < 0 ? 'text-green-505' : 'text-slate-500'}`}>
+                          {s.eggs.netDue > 0 ? `₹${s.eggs.netDue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : 
+                           s.eggs.netDue < 0 ? `Adv: ₹${Math.abs(s.eggs.netDue).toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : 'Settled'}
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))}
               </tbody>
               <tfoot className="bg-slate-50 border-t-2 border-slate-200 print:bg-slate-100">
@@ -935,6 +1107,22 @@ export default function Reports() {
                           ₹{ledgerData.closingBalance.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                         </td>
                       </tr>
+                      {ledgerCategory === 'ALL' && (
+                        <>
+                          <tr className="border-t border-slate-100 dark:border-slate-800/30 text-[10px] text-slate-500">
+                            <td className="pl-4 p-1.5">🐔 Chicken Balance</td>
+                            <td className="p-1.5 text-right font-bold text-slate-700 dark:text-slate-350 font-bold">
+                              ₹{ledgerData.chickenBalance.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                            </td>
+                          </tr>
+                          <tr className="border-t border-slate-100 dark:border-slate-800/30 text-[10px] text-slate-500">
+                            <td className="pl-4 p-1.5">🥚 Eggs Balance</td>
+                            <td className="p-1.5 text-right font-bold text-slate-700 dark:text-slate-350 font-bold">
+                              ₹{ledgerData.eggsBalance.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                            </td>
+                          </tr>
+                        </>
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -966,9 +1154,9 @@ export default function Reports() {
                <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 print:bg-slate-100">
                  <th className="p-4 font-semibold text-slate-600">Date</th>
                  <th className="p-4 font-semibold text-slate-600">Supplier</th>
-                 <th className="p-4 font-semibold text-slate-600 text-right">Birds</th>
-                 <th className="p-4 font-semibold text-slate-600 text-right">Weight</th>
-                 <th className="p-4 font-semibold text-slate-600 text-right">Rate</th>
+                 <th className="p-4 font-semibold text-slate-600 text-right">Birds / Pcs</th>
+                 <th className="p-4 font-semibold text-slate-600 text-right">Weight / Qty</th>
+                 <th className="p-4 font-semibold text-slate-600 text-right">Rate / Unit</th>
                  <th className="p-4 font-semibold text-slate-600">Payment</th>
                  <th className="p-4 font-bold text-slate-800 text-right">Bill Value</th>
                </tr>
@@ -979,7 +1167,7 @@ export default function Reports() {
                    <td className="p-4 text-sm">{item.timestamp ? formatDate(item.timestamp.toDate()) : 'N/A'}</td>
                    <td className="p-4 font-medium">{item.supplierName}</td>
                    <td className="p-4 text-right">{item.numberOfBirds}</td>
-                   <td className="p-4 text-right">{item.weight} kg</td>
+                   <td className="p-4 text-right">{item.weight} {item.chickenType === 'EG' ? 'Pcs' : 'kg'}</td>
                    <td className="p-4 text-right">₹{item.rate}</td>
                    <td className="p-4 text-sm font-bold text-slate-600">{item.paymentMode || 'Credit'}</td>
                    <td className="p-4 text-right font-bold text-slate-800">₹{item.totalValue.toLocaleString('en-IN')}</td>
@@ -990,7 +1178,7 @@ export default function Reports() {
                <tr>
                  <td colSpan="2" className="p-4 font-bold">TOTALS:</td>
                  <td className="p-4 text-right font-bold text-primary-600">{rawTotalBirds}</td>
-                 <td className="p-4 text-right font-bold text-primary-600">{rawTotalWeight.toFixed(2)} kg</td>
+                 <td className="p-4 text-right font-bold text-primary-600">{rawTotalWeight.toFixed(2)} {rawData.every(r => r.chickenType === 'EG') ? 'Pcs' : 'kg'}</td>
                  <td colSpan="2"></td>
                  <td className="p-4 text-right font-bold text-xl">₹{rawTotalValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                </tr>

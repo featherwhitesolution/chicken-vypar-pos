@@ -148,6 +148,7 @@ export default function BillingPOS({ products }) {
         productName: item.product.name,
         quantity: item.quantity,
         rate: item.product.rate,
+        unit: item.product.unit,
         amount: item.amount
       }));
 
@@ -590,13 +591,13 @@ export default function BillingPOS({ products }) {
                   </label>
                   <input
                     type="number"
-                    step="0.01"
+                    step={selectedProduct.unit === 'kg' ? '0.01' : '1'}
                     autoFocus
                     value={inputWeight}
                     onChange={(e) => setInputWeight(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') handleAddToCart() }}
                     className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl py-4 px-4 text-2xl font-bold focus:ring-2 focus:ring-primary-500 transition-shadow"
-                    placeholder="0.00"
+                    placeholder={selectedProduct.unit === 'kg' ? '0.00' : '0'}
                   />
                 </div>
                 <button

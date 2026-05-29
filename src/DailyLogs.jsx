@@ -100,7 +100,7 @@ export default function DailyLogs() {
     // 1. Stock Inward for targetDate
     const inwardsForDay = allStockInwards.filter(item => {
       const itemDateStr = item.timestamp ? item.timestamp.toDate().toISOString().split('T')[0] : '';
-      return itemDateStr === targetDate;
+      return itemDateStr === targetDate && item.chickenType !== 'EG';
     });
 
     const birdsReceived = inwardsForDay.reduce((sum, item) => sum + (item.numberOfBirds || 0), 0);
@@ -149,7 +149,8 @@ export default function DailyLogs() {
       
       if (sale.items && Array.isArray(sale.items)) {
         sale.items.forEach(item => {
-          if (!item.productName.toLowerCase().includes('tray') && !item.productName.toLowerCase().includes('masala')) {
+          const prodNameLower = item.productName.toLowerCase();
+          if (!prodNameLower.includes('tray') && !prodNameLower.includes('masala') && !prodNameLower.includes('egg')) {
             workerPerformance[worker].weight += item.quantity;
           }
         });
@@ -168,7 +169,8 @@ export default function DailyLogs() {
     const totalWeightSold = salesForDay.reduce((sum, s) => {
       if (s.items && Array.isArray(s.items)) {
         return sum + s.items.reduce((wSum, item) => {
-          if (!item.productName.toLowerCase().includes('tray') && !item.productName.toLowerCase().includes('masala')) {
+          const prodNameLower = item.productName.toLowerCase();
+          if (!prodNameLower.includes('tray') && !prodNameLower.includes('masala') && !prodNameLower.includes('egg')) {
             return wSum + item.quantity;
           }
           return wSum;
@@ -176,6 +178,53 @@ export default function DailyLogs() {
       }
       return sum;
     }, 0);
+
+    // Egg calculations for targetDate
+    const eggInwardsForDay = allStockInwards.filter(item => {
+      const itemDateStr = item.timestamp ? item.timestamp.toDate().toISOString().split('T')[0] : '';
+      return itemDateStr === targetDate && item.chickenType === 'EG';
+    });
+    const eggsReceived = eggInwardsForDay.reduce((sum, item) => sum + (item.weight || 0), 0);
+    const eggInwardValue = eggInwardsForDay.reduce((sum, item) => sum + (item.totalValue || 0), 0);
+    const eggSuppliersList = [...new Set(eggInwardsForDay.map(i => i.supplierName))].join(', ') || 'No Supplier';
+
+    const eggsSold = salesForDay.reduce((sum, sale) => {
+      if (sale.items && Array.isArray(sale.items)) {
+        return sum + sale.items.reduce((eSum, item) => {
+          if (item.productName.toLowerCase().includes('egg')) {
+            return eSum + item.quantity;
+          }
+          return eSum;
+        }, 0);
+      }
+      return sum;
+    }, 0);
+
+    const totalEggsReceivedUpToDay = allStockInwards
+      .filter(item => {
+        const itemDateStr = item.timestamp ? item.timestamp.toDate().toISOString().split('T')[0] : '';
+        return itemDateStr <= targetDate && item.chickenType === 'EG';
+      })
+      .reduce((sum, item) => sum + (item.weight || 0), 0);
+
+    const totalEggsSoldUpToDay = allSales
+      .filter(sale => {
+        const saleDateStr = sale.timestamp ? sale.timestamp.toDate().toISOString().split('T')[0] : '';
+        return saleDateStr <= targetDate;
+      })
+      .reduce((sum, sale) => {
+        if (sale.items && Array.isArray(sale.items)) {
+          return sum + sale.items.reduce((eSum, item) => {
+            if (item.productName.toLowerCase().includes('egg')) {
+              return eSum + item.quantity;
+            }
+            return eSum;
+          }, 0);
+        }
+        return sum;
+      }, 0);
+
+    const eggBalanceAtDayEnd = Math.max(0, totalEggsReceivedUpToDay - totalEggsSoldUpToDay);
 
     const netProfit = grossSale - stockValue - lossValue - totalExpenses;
 
@@ -198,7 +247,12 @@ export default function DailyLogs() {
       grossSale,
       cashCollected,
       upiCollected,
-      netProfit
+      netProfit,
+      eggsReceived,
+      eggsSold,
+      eggBalanceAtDayEnd,
+      eggInwardValue,
+      eggSuppliersList
     };
   };
 
@@ -751,9 +805,7 @@ export default function DailyLogs() {
                     <span className="text-[9px] text-slate-400 block mt-1">Total cost of inward</span>
                   </div>
                 </div>
-              </div>
-
-              {/* Mortality */}
+                        {/* Mortality */}
               <div className="mb-6">
                 <div className="flex items-center gap-2 mb-3 border-b border-slate-200 pb-2 text-left">
                   <span className="w-2.5 h-2.5 rounded-full bg-red-650 inline-block"></span>
@@ -782,6 +834,31 @@ export default function DailyLogs() {
                   </div>
                 </div>
               </div>
+
+              {/* Egg Stock Summary */}
+              <div className="mb-6">
+                <div className="flex items-center gap-2 mb-3 border-b border-slate-200 pb-2 text-left">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block"></span>
+                  <h4 className="text-xs font-extrabold uppercase tracking-widest text-slate-500">Egg Inventory & Stock</h4>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-white border border-slate-100 p-3 rounded-xl shadow-sm text-left">
+                    <span className="text-[10px] text-slate-400 block font-semibold">Eggs Received (Today)</span>
+                    <span className="text-xl font-black text-slate-800">{data.eggsReceived} <span className="text-xs font-medium text-slate-400">pcs</span></span>
+                    <span className="text-[9px] text-slate-400 block mt-1 truncate" title={data.eggSuppliersList}>From: {data.eggSuppliersList}</span>
+                  </div>
+                  <div className="bg-white border border-slate-100 p-3 rounded-xl shadow-sm text-left">
+                    <span className="text-[10px] text-slate-400 block font-semibold">Eggs Sold (Today)</span>
+                    <span className="text-xl font-black text-slate-800">{data.eggsSold} <span className="text-xs font-medium text-slate-400">pcs</span></span>
+                    <span className="text-[9px] text-slate-400 block mt-1 text-green-600 font-semibold">Outflow</span>
+                  </div>
+                  <div className="bg-white border border-slate-100 p-3 rounded-xl shadow-sm text-left">
+                    <span className="text-[10px] text-slate-400 block font-semibold">Closing Balance (EOD)</span>
+                    <span className="text-xl font-black text-slate-800">{data.eggBalanceAtDayEnd} <span className="text-xs font-medium text-slate-400">pcs</span></span>
+                    <span className="text-[9px] text-slate-400 block mt-1 text-primary-500 font-semibold">Stock on hand</span>
+                  </div>
+                </div>
+              </div>          </div>
 
               {/* Sales Breakdown */}
               <div className="mb-6">

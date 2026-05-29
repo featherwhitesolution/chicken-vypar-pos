@@ -8,6 +8,13 @@ import SupplierPayments from './SupplierPayments';
 import Reports from './Reports';
 import DailyLogs from './DailyLogs';
 import DeveloperCRM from './DeveloperCRM';
+import WholesaleCustomers from './WholesaleCustomers';
+import FarmInward from './FarmInward';
+import WholesaleDashboard from './WholesaleDashboard';
+import WholesalePOS from './WholesalePOS';
+import CrateLedger from './CrateLedger';
+import WholesaleCollections from './WholesaleCollections';
+import TruckDispatch from './TruckDispatch';
 import { ClipboardList } from 'lucide-react';
 import { initialProducts, shopDetails } from './data';
 import { db } from './firebase';
@@ -16,6 +23,9 @@ import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 function App() {
   const [activeTab, setActiveTab] = useState(() => {
     return localStorage.getItem('activeTab') || 'dashboard';
+  });
+  const [appMode, setAppMode] = useState(() => {
+    return localStorage.getItem('appMode') || 'retail';
   });
   const [products, setProducts] = useState(initialProducts);
   const [user, setUser] = useState(() => {
@@ -104,6 +114,7 @@ function App() {
     averageRate: '0.00',
     totalBirds: 0,
     totalValue: 0,
+    eggsAvailable: 0,
     recentInwards: []
   });
   const [todaySales, setTodaySales] = useState(0);
@@ -130,9 +141,11 @@ function App() {
         const rate = data.rate || 0;
         const birds = data.numberOfBirds || 0;
 
-        totalStockInward += weight;
-        totalValueInward += weight * rate;
-        totalBirdsInward += birds;
+        if (data.chickenType !== 'EG') {
+          totalStockInward += weight;
+          totalValueInward += weight * rate;
+          totalBirdsInward += birds;
+        }
 
         let itemDate = null;
         if (data.timestamp) {
@@ -167,7 +180,8 @@ function App() {
         // All-time sales weight
         if (data.items && Array.isArray(data.items)) {
           data.items.forEach(item => {
-            if (!item.productName.toLowerCase().includes('tray') && !item.productName.toLowerCase().includes('masala')) {
+            const prodNameLower = item.productName.toLowerCase();
+            if (!prodNameLower.includes('tray') && !prodNameLower.includes('masala') && !prodNameLower.includes('egg')) {
               totalWeightSold += (item.quantity || 0);
             }
           });
@@ -196,6 +210,27 @@ function App() {
         totalWeightLoss += (data.weightLoss || 0);
       });
 
+      // 4. Live Eggs calculations
+      let totalEggsInward = 0;
+      stockList.forEach(data => {
+        if (data.chickenType === 'EG') {
+          totalEggsInward += (data.weight || 0);
+        }
+      });
+
+      let totalEggsSold = 0;
+      salesList.forEach(data => {
+        if (data.items && Array.isArray(data.items)) {
+          data.items.forEach(item => {
+            if (item.productName.toLowerCase().includes('egg')) {
+              totalEggsSold += (item.quantity || 0);
+            }
+          });
+        }
+      });
+
+      const liveEggBalance = Math.max(0, totalEggsInward - totalEggsSold);
+
       const avgRate = totalStockInward > 0 ? (totalValueInward / totalStockInward) : 0;
       const actualStockAvailable = Math.max(0, totalStockInward - totalWeightSold - totalWeightLoss);
 
@@ -204,6 +239,7 @@ function App() {
         averageRate: avgRate.toFixed(2),
         totalBirds: totalBirdsInward,
         totalValue: totalValueInward,
+        eggsAvailable: liveEggBalance,
         recentInwards: recentInwards
       });
       setTodaySales(salesSumToday);
@@ -247,31 +283,47 @@ function App() {
   }, [user]);
 
   useEffect(() => {
-    if (user && user.role === 'Retailer' && user.username) {
-      const mobileInput = user.username.trim().replace(/\D/g, '');
-      const savedShops = localStorage.getItem('crm_shops');
-      if (savedShops) {
-        try {
-          const shopsList = JSON.parse(savedShops);
-          const matchedShop = shopsList.find(s => {
-            const cleanShopPhone = s.phone.replace(/\D/g, '');
-            return cleanShopPhone.endsWith(mobileInput) || mobileInput.endsWith(cleanShopPhone);
-          });
-          if (matchedShop) {
-            setShopStatus(matchedShop);
-            const newShopDetails = {
-              customerUniqueId: matchedShop.customerUniqueId,
-              shopName: matchedShop.shopName,
-              proprietorName: matchedShop.proprietorName,
-              address: matchedShop.address,
-              phone: matchedShop.phone,
-              gstin: matchedShop.gstin || '27AAAAA1111A1Z1'
-            };
-            setShopInfo(newShopDetails);
-            localStorage.setItem('shopInfo', JSON.stringify(newShopDetails));
+    if (user) {
+      if (user.role === 'Wholesaler') {
+        setAppMode('wholesale');
+        setActiveTab(prev => {
+          const wholesaleTabs = ['wholesale_dashboard', 'wholesale_customers', 'wholesale_pos', 'farm_inward', 'crate_ledger', 'wholesale_collections', 'settings'];
+          return wholesaleTabs.includes(prev) ? prev : 'wholesale_dashboard';
+        });
+      } else if (user.role === 'Retailer') {
+        setAppMode('retail');
+        setActiveTab(prev => {
+          const retailTabs = ['dashboard', 'rates', 'pos', 'stock', 'payments', 'reports', 'workers', 'settings'];
+          return retailTabs.includes(prev) ? prev : 'dashboard';
+        });
+      }
+
+      if (user.role === 'Retailer' && user.username) {
+        const mobileInput = user.username.trim().replace(/\D/g, '');
+        const savedShops = localStorage.getItem('crm_shops');
+        if (savedShops) {
+          try {
+            const shopsList = JSON.parse(savedShops);
+            const matchedShop = shopsList.find(s => {
+              const cleanShopPhone = s.phone.replace(/\D/g, '');
+              return cleanShopPhone.endsWith(mobileInput) || mobileInput.endsWith(cleanShopPhone);
+            });
+            if (matchedShop) {
+              setShopStatus(matchedShop);
+              const newShopDetails = {
+                customerUniqueId: matchedShop.customerUniqueId,
+                shopName: matchedShop.shopName,
+                proprietorName: matchedShop.proprietorName,
+                address: matchedShop.address,
+                phone: matchedShop.phone,
+                gstin: matchedShop.gstin || '27AAAAA1111A1Z1'
+              };
+              setShopInfo(newShopDetails);
+              localStorage.setItem('shopInfo', JSON.stringify(newShopDetails));
+            }
+          } catch (e) {
+            console.error("Error setting dynamic shop context by phone:", e);
           }
-        } catch (e) {
-          console.error("Error setting dynamic shop context by phone:", e);
         }
       }
     }
@@ -346,16 +398,28 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 font-sans transition-colors duration-300 print:bg-white print:text-black">
+    <div className={`min-h-screen font-sans transition-colors duration-300 print:bg-white print:text-black ${
+      appMode === 'wholesale'
+        ? 'wholesale-mode bg-white dark:bg-slate-900 text-emerald-950 dark:text-emerald-100'
+        : 'bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100'
+    }`}>
       {/* Mobile Top Bar */}
-      <div className="md:hidden flex items-center justify-between p-4 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-20 print:hidden">
+      <div className={`md:hidden flex items-center justify-between p-4 border-b sticky top-0 z-20 print:hidden ${
+        appMode === 'wholesale'
+          ? 'bg-[#064e3b] border-emerald-800 text-white shadow-md'
+          : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'
+      }`}>
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-full overflow-hidden shadow-md shrink-0">
             <img src="/logo.png" alt="Logo" className="w-full h-full object-cover bg-white" />
           </div>
-          <h1 className="text-lg font-bold tracking-tight text-gradient">Chicken Vypar</h1>
+          <h1 className={`text-lg font-bold tracking-tight ${appMode === 'wholesale' ? 'text-white' : 'text-gradient'}`}>Chicken Vypar</h1>
         </div>
-        <button onClick={toggleMobileMenu} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-lg text-slate-600 dark:text-slate-300">
+        <button onClick={toggleMobileMenu} className={`p-2 rounded-lg ${
+          appMode === 'wholesale'
+            ? 'bg-emerald-800 text-emerald-100 hover:bg-emerald-700'
+            : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+        }`}>
           {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
         </button>
       </div>
@@ -369,32 +433,104 @@ function App() {
       )}
 
       {/* Sidebar */}
-      <aside className={`fixed left-0 top-0 h-full w-64 glass-panel border-r border-slate-200 dark:border-slate-800 z-30 flex flex-col transition-transform duration-300 ease-in-out print:hidden ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+      <aside className={`fixed left-0 top-0 h-full w-64 z-30 flex flex-col transition-transform duration-300 ease-in-out print:hidden ${
+        appMode === 'wholesale'
+          ? 'bg-gradient-to-b from-[#064e3b] via-[#043d2f] to-[#022c22] border-r border-emerald-905 text-emerald-100 shadow-2xl shadow-emerald-950/20'
+          : 'glass-panel border-r border-slate-200 dark:border-slate-800'
+      } ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
+        <div className={`p-6 flex items-center gap-3 border-b ${
+          appMode === 'wholesale' ? 'border-emerald-800/40' : 'border-slate-200 dark:border-slate-800'
         }`}>
-        <div className="p-6 flex items-center gap-3 border-b border-slate-200 dark:border-slate-800">
           <div className="w-10 h-10 rounded-full overflow-hidden shadow-lg shadow-primary-500/30 shrink-0 border-2 border-white/50">
             <img src="/logo.png" alt="Logo" className="w-full h-full object-cover bg-white" />
           </div>
-          <h1 className="text-xl font-bold tracking-tight text-gradient">Chicken Vypar</h1>
+          <div>
+            <h1 className={`text-xl font-bold tracking-tight leading-none ${
+              appMode === 'wholesale' 
+                ? 'text-white font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-emerald-300 to-teal-100' 
+                : 'text-gradient'
+            }`}>
+              Chicken Vypar
+            </h1>
+            {appMode === 'wholesale' && (
+              <span className="text-[9px] font-extrabold text-emerald-300/80 uppercase tracking-widest mt-1 block">Wholesale ERP</span>
+            )}
+          </div>
 
-          <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden ml-auto p-1 bg-slate-100 dark:bg-slate-800 rounded-md">
-            <X className="w-5 h-5 text-slate-500" />
+          <button onClick={() => setIsMobileMenuOpen(false)} className={`md:hidden ml-auto p-1 rounded-md ${
+            appMode === 'wholesale' ? 'bg-emerald-800 text-emerald-100' : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+          }`}>
+            <X className="w-5 h-5" />
           </button>
         </div>
 
+        {/* Retail vs Wholesale Panel Switcher */}
+        {user && user.role !== 'Retailer' && user.role !== 'Wholesaler' && (
+          <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800">
+            <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl">
+              <button
+                onClick={() => {
+                  setAppMode('retail');
+                  localStorage.setItem('appMode', 'retail');
+                  setActiveTab('dashboard');
+                }}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                  appMode === 'retail'
+                    ? 'bg-blue-600 text-white shadow-md font-bold'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-350'
+                }`}
+              >
+                <span>🏪</span>
+                <span>Retail</span>
+              </button>
+              <button
+                onClick={() => {
+                  setAppMode('wholesale');
+                  localStorage.setItem('appMode', 'wholesale');
+                  setActiveTab('wholesale_dashboard');
+                }}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                  appMode === 'wholesale'
+                    ? 'bg-indigo-600 text-white shadow-md font-bold'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-350'
+                }`}
+              >
+                <span>🚛</span>
+                <span>Wholesale</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-          <NavItem icon={<LayoutDashboard />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => { setActiveTab('dashboard'); setIsMobileMenuOpen(false); }} />
-          <NavItem icon={<Tag />} label="Daily Rates" active={activeTab === 'rates'} onClick={() => { setActiveTab('rates'); setIsMobileMenuOpen(false); }} />
-          <NavItem icon={<ShoppingCart />} label="Billing POS" active={activeTab === 'pos'} onClick={() => { setActiveTab('pos'); setIsMobileMenuOpen(false); }} />
-          <NavItem icon={<Package />} label="Stock Inward" active={activeTab === 'stock'} onClick={() => { setActiveTab('stock'); setIsMobileMenuOpen(false); }} />
-          <NavItem icon={<IndianRupee />} label="Payments" active={activeTab === 'payments'} onClick={() => { setActiveTab('payments'); setIsMobileMenuOpen(false); }} />
-          <NavItem icon={<FileText />} label="Reports" active={activeTab === 'reports'} onClick={() => { setActiveTab('reports'); setIsMobileMenuOpen(false); }} />
-          <NavItem icon={<ClipboardList />} label="Day Summary" active={activeTab === 'workers'} onClick={() => { setActiveTab('workers'); setIsMobileMenuOpen(false); }} />
+          {appMode === 'retail' ? (
+            <>
+              <NavItem mode={appMode} icon={<LayoutDashboard />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => { setActiveTab('dashboard'); setIsMobileMenuOpen(false); }} />
+              <NavItem mode={appMode} icon={<Tag />} label="Daily Rates" active={activeTab === 'rates'} onClick={() => { setActiveTab('rates'); setIsMobileMenuOpen(false); }} />
+              <NavItem mode={appMode} icon={<ShoppingCart />} label="Billing POS" active={activeTab === 'pos'} onClick={() => { setActiveTab('pos'); setIsMobileMenuOpen(false); }} />
+              <NavItem mode={appMode} icon={<Package />} label="Stock Inward" active={activeTab === 'stock'} onClick={() => { setActiveTab('stock'); setIsMobileMenuOpen(false); }} />
+              <NavItem mode={appMode} icon={<IndianRupee />} label="Payments" active={activeTab === 'payments'} onClick={() => { setActiveTab('payments'); setIsMobileMenuOpen(false); }} />
+              <NavItem mode={appMode} icon={<FileText />} label="Reports" active={activeTab === 'reports'} onClick={() => { setActiveTab('reports'); setIsMobileMenuOpen(false); }} />
+              <NavItem mode={appMode} icon={<ClipboardList />} label="Day Summary" active={activeTab === 'workers'} onClick={() => { setActiveTab('workers'); setIsMobileMenuOpen(false); }} />
+            </>
+          ) : (
+            <>
+              <NavItem mode={appMode} icon={<LayoutDashboard />} label="Dashboard (WS)" active={activeTab === 'wholesale_dashboard'} onClick={() => { setActiveTab('wholesale_dashboard'); setIsMobileMenuOpen(false); }} />
+              <NavItem mode={appMode} icon={<User />} label="Customers & Rates" active={activeTab === 'wholesale_customers'} onClick={() => { setActiveTab('wholesale_customers'); setIsMobileMenuOpen(false); }} />
+              <NavItem mode={appMode} icon={<ShoppingCart />} label="Wholesale POS" active={activeTab === 'wholesale_pos'} onClick={() => { setActiveTab('wholesale_pos'); setIsMobileMenuOpen(false); }} />
+              <NavItem mode={appMode} icon={<Truck />} label="Truck Dispatch" active={activeTab === 'truck_dispatch'} onClick={() => { setActiveTab('truck_dispatch'); setIsMobileMenuOpen(false); }} />
+              <NavItem mode={appMode} icon={<Truck />} label="Farm Inwards" active={activeTab === 'farm_inward'} onClick={() => { setActiveTab('farm_inward'); setIsMobileMenuOpen(false); }} />
+              <NavItem mode={appMode} icon={<Package />} label="Crate Ledger" active={activeTab === 'crate_ledger'} onClick={() => { setActiveTab('crate_ledger'); setIsMobileMenuOpen(false); }} />
+              <NavItem mode={appMode} icon={<FileText />} label="Collections" active={activeTab === 'wholesale_collections'} onClick={() => { setActiveTab('wholesale_collections'); setIsMobileMenuOpen(false); }} />
+            </>
+          )}
         </nav>
 
-        <div className="p-4 border-t border-slate-200 dark:border-slate-800 space-y-2">
-          <NavItem icon={<Settings />} label="Settings" active={activeTab === 'settings'} onClick={() => { setActiveTab('settings'); setIsMobileMenuOpen(false); }} />
-          <NavItem icon={<LogOut />} label="Logout" active={false} onClick={() => setUser(null)} />
+        <div className={`p-4 border-t space-y-2 ${
+          appMode === 'wholesale' ? 'border-emerald-800/40' : 'border-slate-200 dark:border-slate-800'
+        }`}>
+          <NavItem mode={appMode} icon={<Settings />} label="Settings" active={activeTab === 'settings'} onClick={() => { setActiveTab('settings'); setIsMobileMenuOpen(false); }} />
+          <NavItem mode={appMode} icon={<LogOut />} label="Logout" active={false} onClick={() => setUser(null)} />
         </div>
       </aside>
 
@@ -417,17 +553,46 @@ function App() {
           </div>
         )}
 
-        <header className="flex flex-col md:flex-row md:justify-between md:items-center mb-8 gap-4 print:hidden">
+        <header className="flex flex-col md:flex-row md:justify-between md:items-center mb-8 gap-4 print:hidden text-left">
           <div>
-            <h2 className="text-2xl md:text-3xl font-bold tracking-tight">Welcome back, {shopInfo.shopName}</h2>
-            <p className="text-slate-500 dark:text-slate-400 mt-1">Here's what's happening at your shop today.</p>
+            <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight">
+              {appMode === 'wholesale' ? (
+                <span className="flex items-center gap-2">
+                  <span className="text-indigo-650 dark:text-indigo-400">Wholesale Hub:</span>
+                  <span className="text-slate-805 dark:text-white">{shopInfo.shopName}</span>
+                </span>
+              ) : (
+                `Welcome back, ${shopInfo.shopName}`
+              )}
+            </h2>
+            <p className="text-slate-500 dark:text-slate-400 mt-1">
+              {appMode === 'wholesale' 
+                ? 'B2B Client Logistics, Farm procurement and Weekly Settlements.' 
+                : "Here's what's happening at your shop today."}
+            </p>
           </div>
+          
           <div className="flex items-center gap-4 self-start md:self-auto">
+            {appMode === 'wholesale' ? (
+              <span className="px-3.5 py-1.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 text-xs font-black uppercase tracking-wider rounded-full border border-emerald-250/50 flex items-center gap-1.5 shadow-sm">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                Wholesale Live
+              </span>
+            ) : (
+              <span className="px-3.5 py-1.5 bg-blue-50 dark:bg-blue-955/20 text-blue-700 dark:text-blue-400 text-xs font-black uppercase tracking-wider rounded-full border border-blue-200/50 flex items-center gap-1.5 shadow-sm">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse"></span>
+                Retail Live
+              </span>
+            )}
             <div className="bg-white dark:bg-slate-800 rounded-full px-4 py-2 shadow-sm border border-slate-200 dark:border-slate-700 text-sm font-medium">
               15 May, 2026
             </div>
-            <div className="h-10 w-10 rounded-full bg-primary-100 dark:bg-primary-900/50 flex items-center justify-center border border-primary-200 dark:border-primary-800 shrink-0">
-              <User className="w-5 h-5 text-primary-600 dark:text-primary-400" />
+            <div className={`h-10 w-10 rounded-full flex items-center justify-center border shrink-0 ${
+              appMode === 'wholesale'
+                ? 'bg-emerald-50 dark:bg-emerald-950 border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-455'
+                : 'bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-400'
+            }`}>
+              <User className="w-5 h-5" />
             </div>
           </div>
         </header>
@@ -435,10 +600,11 @@ function App() {
         {activeTab === 'dashboard' && (
           <>
             {/* Dashboard Content */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 mb-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 md:gap-6 mb-8">
               <StatCard title="Today's Sales" value={`₹ ${todaySales.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`} trend="Live" isPositive={true} />
               <StatCard title="Total Birds" value={dashboardStats.totalBirds} trend="Inward" isPositive={true} />
               <StatCard title="Stock Available" value={`${dashboardStats.stockAvailable} kg`} trend="Live" isPositive={true} />
+              <StatCard title="Eggs Available" value={`${dashboardStats.eggsAvailable} pcs`} trend="Live" isPositive={true} />
               <StatCard
                 title="Avg. Purchase Rate"
                 value={`₹ ${dashboardStats.averageRate}`}
@@ -517,15 +683,15 @@ function App() {
                         </div>
                         <div className="grid grid-cols-2 gap-2 text-sm">
                           <div>
-                            <span className="text-slate-500 block text-xs">Weight</span>
-                            <span className="font-medium">{inward.weight} kg</span>
+                            <span className="text-slate-500 block text-xs">{inward.chickenType === 'EG' ? 'Total Eggs' : 'Weight'}</span>
+                            <span className="font-medium">{inward.weight} {inward.chickenType === 'EG' ? 'pcs' : 'kg'}</span>
                           </div>
                           <div>
                             <span className="text-slate-500 block text-xs">Rate</span>
-                            <span className="font-medium text-green-600 dark:text-green-400">₹{inward.rate}/kg</span>
+                            <span className="font-medium text-green-600 dark:text-green-400">₹{inward.rate}/{inward.chickenType === 'EG' ? 'pc' : 'kg'}</span>
                           </div>
                           <div>
-                            <span className="text-slate-500 block text-xs">Chickens</span>
+                            <span className="text-slate-500 block text-xs">{inward.chickenType === 'EG' ? 'Trays' : 'Chickens'}</span>
                             <span className="font-medium">{inward.numberOfBirds}</span>
                           </div>
                           <div>
@@ -546,6 +712,7 @@ function App() {
           </>
         )}
 
+        {/* Retail Views */}
         {activeTab === 'pos' && (
           <BillingPOS products={products} />
         )}
@@ -570,6 +737,35 @@ function App() {
           <DailyLogs />
         )}
 
+        {/* Wholesale Views */}
+        {activeTab === 'wholesale_customers' && (
+          <WholesaleCustomers />
+        )}
+
+        {activeTab === 'farm_inward' && (
+          <FarmInward />
+        )}
+
+        {activeTab === 'wholesale_dashboard' && (
+          <WholesaleDashboard products={products} />
+        )}
+
+        {activeTab === 'wholesale_pos' && (
+          <WholesalePOS products={products} />
+        )}
+
+        {activeTab === 'crate_ledger' && (
+          <CrateLedger />
+        )}
+
+        {activeTab === 'truck_dispatch' && (
+          <TruckDispatch />
+        )}
+
+        {activeTab === 'wholesale_collections' && (
+          <WholesaleCollections />
+        )}
+
         {activeTab === 'settings' && (
           <SettingsPanel shopStatus={shopStatus} setShopStatus={setShopStatus} />
         )}
@@ -578,13 +774,21 @@ function App() {
   );
 }
 
-function NavItem({ icon, label, active, onClick }) {
+function NavItem({ icon, label, active, onClick, mode = 'retail' }) {
+  const activeClass = mode === 'wholesale'
+    ? 'bg-emerald-600 text-white font-black shadow-lg shadow-emerald-950/45 border border-emerald-500/30'
+    : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold shadow-lg shadow-blue-600/15';
+  
+  const inactiveClass = mode === 'wholesale'
+    ? 'text-emerald-100 hover:bg-emerald-800/40 hover:text-white font-semibold'
+    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white font-medium';
+
   return (
     <button
       onClick={onClick}
-      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${active
-        ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold shadow-lg shadow-blue-600/15'
-        : 'text-slate-600 dark:text-slate-400 hover:bg-gradient-to-r hover:from-blue-600 hover:to-indigo-600 hover:text-white hover:font-bold hover:shadow-lg hover:shadow-blue-600/15'
+      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 cursor-pointer ${active
+        ? activeClass
+        : inactiveClass
         }`}
     >
       {React.cloneElement(icon, { className: 'w-5 h-5 shrink-0' })}
