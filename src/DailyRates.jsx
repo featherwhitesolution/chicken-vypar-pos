@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
-import { Save, Tag, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Save, Tag, RefreshCw, Loader2 } from 'lucide-react';
+import { db } from './firebase';
+import { doc, writeBatch } from 'firebase/firestore';
 
 export default function DailyRates({ products, setProducts }) {
   const [localRates, setLocalRates] = useState(() => {
@@ -12,13 +14,41 @@ export default function DailyRates({ products, setProducts }) {
     setLocalRates(prev => ({ ...prev, [id]: Number(newRate) }));
   };
 
-  const saveRates = () => {
-    const updatedProducts = products.map(p => ({
-      ...p,
-      rate: localRates[p.id] !== undefined ? localRates[p.id] : p.rate
-    }));
-    setProducts(updatedProducts);
-    alert('Rates saved successfully!');
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Sync local state if products change from outside (e.g., via realtime listener in App)
+  useEffect(() => {
+    setLocalRates(prev => {
+      const newRates = { ...prev };
+      products.forEach(p => {
+        // If we haven't modified it locally yet, keep it synced with upstream
+        if (newRates[p.id] === undefined) {
+          newRates[p.id] = p.rate;
+        }
+      });
+      return newRates;
+    });
+  }, [products]);
+
+  const saveRates = async () => {
+    setIsSaving(true);
+    try {
+      const batch = writeBatch(db);
+      
+      products.forEach(p => {
+        const docRef = doc(db, 'retail_products', p.id.toString());
+        const newRate = localRates[p.id] !== undefined ? localRates[p.id] : p.rate;
+        batch.update(docRef, { rate: newRate });
+      });
+
+      await batch.commit();
+      alert('Rates saved to cloud successfully!');
+    } catch (err) {
+      console.error('Failed to save rates:', err);
+      alert('Failed to save rates. Check console.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const categories = [...new Set(products.map(p => p.category))];
@@ -37,10 +67,11 @@ export default function DailyRates({ products, setProducts }) {
         </div>
         <button 
           onClick={saveRates}
-          className="bg-primary-600 hover:bg-primary-700 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-primary-600/20 transition-all active:scale-95"
+          disabled={isSaving}
+          className="bg-primary-600 hover:bg-primary-700 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-primary-600/20 transition-all active:scale-95 disabled:opacity-70"
         >
-          <Save className="w-5 h-5" />
-          Save Rates
+          {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+          {isSaving ? 'Saving...' : 'Save Rates'}
         </button>
       </div>
 

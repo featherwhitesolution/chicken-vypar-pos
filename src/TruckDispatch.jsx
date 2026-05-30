@@ -7,7 +7,7 @@ import {
 import {
   Truck, Plus, Save, Loader2, CheckCircle2, AlertTriangle,
   Package, ArrowRight, Calendar, Phone, User, Hash, Scale,
-  IndianRupee, ChevronDown, ChevronUp, Clock, RotateCcw
+  IndianRupee, ChevronDown, ChevronUp, Clock, RotateCcw, Wallet
 } from 'lucide-react';
 
 const STATUS_CONFIG = {
@@ -22,7 +22,15 @@ export default function TruckDispatch() {
   const [isSaving, setIsSaving] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
   const [showPartialModal, setShowPartialModal] = useState(null); // dispatch object
+  const [showAdjustModal, setShowAdjustModal] = useState(null);
+  const [showExpenseModal, setShowExpenseModal] = useState(null);
+  const [expenseForm, setExpenseForm] = useState({
+    dieselExpense: '', driverBhatta: '', tollExpense: '', otherExpenses: ''
+  });
+  const [adjustDeadKg, setAdjustDeadKg] = useState('');
   const [partialSoldKg, setPartialSoldKg] = useState('');
+  const [partialDeadKg, setPartialDeadKg] = useState('');
+  const [partialDeadCount, setPartialDeadCount] = useState('');
   const [isUpdating, setIsUpdating] = useState(false);
 
   const todayStr = new Date().toISOString().split('T')[0];
@@ -93,6 +101,7 @@ export default function TruckDispatch() {
       await updateDoc(doc(db, 'truck_dispatches', dispatch.id), {
         status: 'sold',
         soldWeightKg: dispatch.totalWeightKg,
+        deadBirdsWeightKg: 0,
         remainingWeightKg: 0,
         resolvedAt: new Date().toISOString(),
       });
@@ -104,50 +113,91 @@ export default function TruckDispatch() {
   };
 
   const handlePartialSale = async () => {
-    const soldKg = parseFloat(partialSoldKg) || 0;
-    if (soldKg <= 0 || soldKg > showPartialModal.totalWeightKg) {
-      alert('Enter a valid sold weight.');
+    const additionalSoldKg = parseFloat(partialSoldKg) || 0;
+    const additionalDeadKg = parseFloat(partialDeadKg) || 0;
+    const additionalDeadCount = parseInt(partialDeadCount) || 0;
+
+    if (additionalSoldKg <= 0 && additionalDeadKg <= 0) {
+      alert('Enter a valid sold or dead weight.');
       return;
     }
-    const remaining = parseFloat((showPartialModal.totalWeightKg - soldKg).toFixed(2));
+    
+    const newSoldKg = (showPartialModal.soldWeightKg || 0) + additionalSoldKg;
+    const newDeadKg = (showPartialModal.deadBirdsWeightKg || 0) + additionalDeadKg;
+    const newDeadCount = (showPartialModal.deadBirdsCount || 0) + additionalDeadCount;
+
+    const remaining = parseFloat((showPartialModal.totalWeightKg - newSoldKg - newDeadKg).toFixed(2));
+    
+    if (remaining < 0) {
+      alert('Total sold + dead weight cannot exceed the total loaded weight.');
+      return;
+    }
+    
     setIsUpdating(true);
     try {
-      // Update current dispatch as partial
       await updateDoc(doc(db, 'truck_dispatches', showPartialModal.id), {
-        status: 'partial',
-        soldWeightKg: soldKg,
+        status: remaining > 0 ? 'partial' : 'sold',
+        soldWeightKg: newSoldKg,
+        deadBirdsWeightKg: newDeadKg,
+        deadBirdsCount: newDeadCount,
         remainingWeightKg: remaining,
         updatedAt: new Date().toISOString(),
       });
 
-      // Create carry-over dispatch for tomorrow
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      const tomorrowStr = tomorrow.toISOString().split('T')[0];
-
-      await addDoc(collection(db, 'truck_dispatches'), {
-        truckNumber: showPartialModal.truckNumber,
-        driverName: showPartialModal.driverName,
-        driverPhone: showPartialModal.driverPhone,
-        dispatchDate: tomorrowStr,
-        totalBirds: 0,
-        totalWeightKg: remaining,
-        soldWeightKg: 0,
-        remainingWeightKg: remaining,
-        ratePerKg: showPartialModal.ratePerKg, // locked yesterday's rate
-        status: 'carryover',
-        isCarryOver: true,
-        carryOverFromId: showPartialModal.id,
-        carryOverDate: showPartialModal.dispatchDate,
-        notes: `Carry-over from ${showPartialModal.truckNumber} on ${showPartialModal.dispatchDate}`,
-        createdAt: new Date().toISOString(),
-      });
-
       setShowPartialModal(null);
       setPartialSoldKg('');
+      setPartialDeadKg('');
+      setPartialDeadCount('');
     } catch (err) {
       console.error(err);
       alert('Failed to record partial sale.');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleAdjustMortality = async () => {
+    const additionalDeadKg = parseFloat(adjustDeadKg) || 0;
+    if (additionalDeadKg <= 0) {
+      alert('Please enter a valid mortality weight.');
+      return;
+    }
+    if (additionalDeadKg > (showAdjustModal.soldWeightKg || 0)) {
+      alert('Mortality adjustment cannot exceed the currently recorded sold weight.');
+      return;
+    }
+
+    setIsUpdating(true);
+    try {
+      await updateDoc(doc(db, 'truck_dispatches', showAdjustModal.id), {
+        soldWeightKg: showAdjustModal.soldWeightKg - additionalDeadKg,
+        deadBirdsWeightKg: (showAdjustModal.deadBirdsWeightKg || 0) + additionalDeadKg,
+        updatedAt: new Date().toISOString(),
+      });
+      setShowAdjustModal(null);
+      setAdjustDeadKg('');
+    } catch (err) {
+      console.error(err);
+      alert('Failed to adjust mortality.');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleSaveExpenses = async () => {
+    setIsUpdating(true);
+    try {
+      await updateDoc(doc(db, 'truck_dispatches', showExpenseModal.id), {
+        dieselExpense: parseFloat(expenseForm.dieselExpense) || 0,
+        driverBhatta: parseFloat(expenseForm.driverBhatta) || 0,
+        tollExpense: parseFloat(expenseForm.tollExpense) || 0,
+        otherExpenses: parseFloat(expenseForm.otherExpenses) || 0,
+        updatedAt: new Date().toISOString()
+      });
+      setShowExpenseModal(null);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to save expenses.');
     } finally {
       setIsUpdating(false);
     }
@@ -343,6 +393,7 @@ export default function TruckDispatch() {
                 const isExpanded = expandedId === d.id;
                 const estimatedValue = ((d.totalWeightKg || 0) * (d.ratePerKg || 0));
                 const soldValue = ((d.soldWeightKg || 0) * (d.ratePerKg || 0));
+                const totalExpenses = (parseFloat(d.dieselExpense) || 0) + (parseFloat(d.driverBhatta) || 0) + (parseFloat(d.tollExpense) || 0) + (parseFloat(d.otherExpenses) || 0);
 
                 return (
                   <div key={d.id} className="text-left">
@@ -395,8 +446,10 @@ export default function TruckDispatch() {
                             { label: 'Locked Rate', value: `₹${d.ratePerKg}/kg` },
                             { label: 'Est. Truck Value', value: `₹${estimatedValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` },
                             { label: 'Sold Weight', value: `${d.soldWeightKg || 0} kg` },
+                            { label: 'Mortality', value: `${d.deadBirdsWeightKg || 0} kg` },
                             { label: 'Remaining', value: `${d.remainingWeightKg?.toFixed(1)} kg` },
                             { label: 'Sold Value', value: `₹${soldValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` },
+                            { label: 'Expenses', value: `₹${totalExpenses.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` },
                             { label: 'Status', value: cfg.label },
                           ].map((item, i) => (
                             <div key={i} className="p-2 bg-white dark:bg-slate-900/60 rounded-xl border border-slate-100 dark:border-slate-800">
@@ -413,18 +466,32 @@ export default function TruckDispatch() {
                         )}
 
                         {/* Action Buttons */}
-                        {(d.status === 'active' || d.status === 'carryover') && (
-                          <div className="flex gap-2 mt-3">
+                        {(d.status === 'active' || d.status === 'carryover' || d.status === 'partial') && (
+                          <div className="flex gap-2 mt-3 flex-wrap">
                             <button
-                              onClick={() => { setShowPartialModal(d); setPartialSoldKg(''); }}
-                              className="flex-1 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                              onClick={() => { setShowPartialModal(d); setPartialSoldKg(''); setPartialDeadKg(''); setPartialDeadCount(''); }}
+                              className="flex-1 min-w-[140px] py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                             >
-                              <Package className="w-3.5 h-3.5" /> Partial Sale + Carry Over
+                              <Package className="w-3.5 h-3.5" /> Log Sales / Mortality
+                            </button>
+                            <button
+                              onClick={() => {
+                                setShowExpenseModal(d);
+                                setExpenseForm({
+                                  dieselExpense: d.dieselExpense || '',
+                                  driverBhatta: d.driverBhatta || '',
+                                  tollExpense: d.tollExpense || '',
+                                  otherExpenses: d.otherExpenses || ''
+                                });
+                              }}
+                              className="flex-[0.5] min-w-[100px] py-2 bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                            >
+                              <Wallet className="w-3.5 h-3.5" /> Expenses
                             </button>
                             <button
                               onClick={() => handleMarkFullySold(d)}
                               disabled={isUpdating}
-                              className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                              className="flex-1 min-w-[140px] py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
                             >
                               <CheckCircle2 className="w-3.5 h-3.5" /> Mark Fully Sold
                             </button>
@@ -432,8 +499,32 @@ export default function TruckDispatch() {
                         )}
 
                         {d.status === 'sold' && (
-                          <div className="mt-3 flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400 font-bold">
-                            <CheckCircle2 className="w-4 h-4" /> Truck returned. All stock sold.
+                          <div className="mt-3 flex flex-col gap-3 bg-emerald-50/50 dark:bg-emerald-900/10 p-3 rounded-xl border border-emerald-100 dark:border-emerald-800/30">
+                            <span className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-bold text-xs">
+                              <CheckCircle2 className="w-4 h-4" /> Truck returned. All stock sold.
+                            </span>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => { setShowAdjustModal(d); setAdjustDeadKg(''); }}
+                                className="flex-1 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer text-xs font-bold"
+                              >
+                                <AlertTriangle className="w-3.5 h-3.5" /> Late Mortality
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setShowExpenseModal(d);
+                                  setExpenseForm({
+                                    dieselExpense: d.dieselExpense || '',
+                                    driverBhatta: d.driverBhatta || '',
+                                    tollExpense: d.tollExpense || '',
+                                    otherExpenses: d.otherExpenses || ''
+                                  });
+                                }}
+                                className="flex-1 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer text-xs font-bold"
+                              >
+                                <Wallet className="w-3.5 h-3.5" /> Update Expenses
+                              </button>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -466,50 +557,223 @@ export default function TruckDispatch() {
                   type="number" step="0.1"
                   value={partialSoldKg}
                   onChange={e => setPartialSoldKg(e.target.value)}
-                  className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 text-lg font-black"
+                  className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-lg font-black"
                   placeholder="0.0"
                   autoFocus
                 />
               </div>
 
-              {partialSoldKg && parseFloat(partialSoldKg) > 0 && (
-                <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold uppercase tracking-wider text-red-500">Mortality Wt (kg)</label>
+                  <input
+                    type="number" step="0.1"
+                    value={partialDeadKg}
+                    onChange={e => setPartialDeadKg(e.target.value)}
+                    className="w-full p-3 bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-900/30 rounded-xl outline-none focus:ring-2 focus:ring-red-500 text-lg font-black text-red-700 dark:text-red-400"
+                    placeholder="0.0"
+                  />
+                </div>
+                
+                <div className="space-y-1">
+                  <label className="text-xs font-bold uppercase tracking-wider text-red-500">Mortality Count</label>
+                  <input
+                    type="number"
+                    value={partialDeadCount}
+                    onChange={e => setPartialDeadCount(e.target.value)}
+                    className="w-full p-3 bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-900/30 rounded-xl outline-none focus:ring-2 focus:ring-red-500 text-lg font-black text-red-700 dark:text-red-400"
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+
+              {(parseFloat(partialSoldKg) > 0 || parseFloat(partialDeadKg) > 0) && (
+                <div className="grid grid-cols-3 gap-3 text-xs">
                   <div className="p-3 bg-emerald-50 dark:bg-emerald-950/20 rounded-xl border border-emerald-100 dark:border-emerald-900">
-                    <span className="block text-emerald-600 font-bold text-[10px] uppercase">Sold</span>
-                    <span className="text-lg font-black text-emerald-700 dark:text-emerald-400">{parseFloat(partialSoldKg).toFixed(1)} kg</span>
-                    <span className="block text-[10px] text-emerald-600 mt-0.5">
-                      ≈ ₹{(parseFloat(partialSoldKg) * showPartialModal.ratePerKg).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                    </span>
+                    <span className="block text-emerald-600 font-bold text-[10px] uppercase">New Sales</span>
+                    <span className="text-lg font-black text-emerald-700 dark:text-emerald-400">{(parseFloat(partialSoldKg) || 0).toFixed(1)} kg</span>
                   </div>
-                  <div className="p-3 bg-blue-50 dark:bg-blue-950/20 rounded-xl border border-blue-100 dark:border-blue-900">
-                    <span className="block text-blue-600 font-bold text-[10px] uppercase">Carry-Over (Tomorrow)</span>
-                    <span className="text-lg font-black text-blue-700 dark:text-blue-400">
-                      {Math.max(0, showPartialModal.totalWeightKg - parseFloat(partialSoldKg)).toFixed(1)} kg
+                  <div className="p-3 bg-red-50 dark:bg-red-950/20 rounded-xl border border-red-100 dark:border-red-900">
+                    <span className="block text-red-600 font-bold text-[10px] uppercase">New Dead</span>
+                    <span className="text-lg font-black text-red-700 dark:text-red-400">{(parseFloat(partialDeadKg) || 0).toFixed(1)} kg</span>
+                  </div>
+                  <div className="p-3 bg-orange-50 dark:bg-orange-950/20 rounded-xl border border-orange-100 dark:border-orange-900">
+                    <span className="block text-orange-600 font-bold text-[10px] uppercase">Remaining</span>
+                    <span className="text-lg font-black text-orange-700 dark:text-orange-400">
+                      {Math.max(0, showPartialModal.totalWeightKg - (showPartialModal.soldWeightKg || 0) - (parseFloat(partialSoldKg) || 0) - (showPartialModal.deadBirdsWeightKg || 0) - (parseFloat(partialDeadKg) || 0)).toFixed(1)} kg
                     </span>
-                    <span className="block text-[10px] text-blue-600 mt-0.5">Locked @ ₹{showPartialModal.ratePerKg}/kg</span>
                   </div>
                 </div>
               )}
-
-              <p className="text-[10px] text-slate-400">
-                ℹ️ Remaining stock will automatically be created as a carry-over dispatch for tomorrow at the same locked rate (₹{showPartialModal.ratePerKg}/kg).
-              </p>
             </div>
 
-            <div className="flex gap-3 mt-5">
+            <div className="mt-6 flex gap-3">
               <button
-                onClick={() => { setShowPartialModal(null); setPartialSoldKg(''); }}
-                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-sm font-bold cursor-pointer transition-colors"
+                onClick={() => setShowPartialModal(null)}
+                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handlePartialSale}
-                disabled={isUpdating || !partialSoldKg || parseFloat(partialSoldKg) <= 0}
-                className="flex-1 py-2.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-sm font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50"
+                disabled={isUpdating}
+                className="flex-[2] py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-xl font-bold flex justify-center items-center gap-2 transition-colors disabled:opacity-50"
               >
-                {isUpdating ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
-                Confirm & Carry Over
+                {isUpdating ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+                Update Sales & Mortality
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Adjust Late Mortality Modal */}
+      {showAdjustModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-sm w-full border border-slate-200 dark:border-slate-800 shadow-2xl animate-in zoom-in-95 text-left">
+            <h3 className="font-bold text-lg text-slate-800 dark:text-white mb-1">Adjust Late Mortality</h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Deduct late reported dead birds from the final sold weight for <span className="font-black font-mono text-slate-700 dark:text-slate-200">{showAdjustModal.truckNumber}</span>.
+            </p>
+
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase tracking-wider text-red-500">Late Mortality (kg) *</label>
+                <input
+                  type="number" step="0.1"
+                  value={adjustDeadKg}
+                  onChange={e => setAdjustDeadKg(e.target.value)}
+                  className="w-full p-3 bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-900/30 rounded-xl outline-none focus:ring-2 focus:ring-red-500 text-lg font-black text-red-700 dark:text-red-400"
+                  placeholder="0.0"
+                  autoFocus
+                />
+              </div>
+
+              {parseFloat(adjustDeadKg) > 0 && (
+                <div className="p-3 bg-orange-50 dark:bg-orange-950/20 rounded-xl border border-orange-100 dark:border-orange-900 text-xs">
+                  <span className="block text-orange-600 font-bold uppercase text-[10px]">Adjustment Preview</span>
+                  <div className="flex justify-between items-center mt-1">
+                    <span className="text-slate-600 dark:text-slate-400">Sold Weight:</span>
+                    <span className="font-bold line-through text-slate-400">{showAdjustModal.soldWeightKg} kg</span>
+                    <ArrowRight className="w-3 h-3 text-slate-400" />
+                    <span className="font-black text-orange-700 dark:text-orange-400">
+                      {Math.max(0, showAdjustModal.soldWeightKg - parseFloat(adjustDeadKg)).toFixed(1)} kg
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowAdjustModal(null)}
+                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAdjustMortality}
+                disabled={isUpdating}
+                className="flex-[2] py-3 bg-red-500 hover:bg-red-600 text-white rounded-xl font-bold flex justify-center items-center gap-2 transition-colors disabled:opacity-50"
+              >
+                {isUpdating ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+                Deduct Sales
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Log Expenses Modal */}
+      {showExpenseModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-sm w-full border border-slate-200 dark:border-slate-800 shadow-2xl animate-in zoom-in-95 text-left">
+            <h3 className="font-bold text-lg text-slate-800 dark:text-white mb-1">Truck Expenses</h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Record transit expenses for <span className="font-black font-mono text-slate-700 dark:text-slate-200">{showExpenseModal.truckNumber}</span>.
+            </p>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Diesel / Fuel</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-3 text-slate-400 font-bold text-sm">₹</span>
+                    <input
+                      type="number" step="1"
+                      value={expenseForm.dieselExpense}
+                      onChange={e => setExpenseForm({...expenseForm, dieselExpense: e.target.value})}
+                      className="w-full p-3 pl-7 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm font-bold text-slate-800 dark:text-white"
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Driver Bhatta</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-3 text-slate-400 font-bold text-sm">₹</span>
+                    <input
+                      type="number" step="1"
+                      value={expenseForm.driverBhatta}
+                      onChange={e => setExpenseForm({...expenseForm, driverBhatta: e.target.value})}
+                      className="w-full p-3 pl-7 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm font-bold text-slate-800 dark:text-white"
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Toll / RTO</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-3 text-slate-400 font-bold text-sm">₹</span>
+                    <input
+                      type="number" step="1"
+                      value={expenseForm.tollExpense}
+                      onChange={e => setExpenseForm({...expenseForm, tollExpense: e.target.value})}
+                      className="w-full p-3 pl-7 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm font-bold text-slate-800 dark:text-white"
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Other (Wash/Repairs)</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-3 text-slate-400 font-bold text-sm">₹</span>
+                    <input
+                      type="number" step="1"
+                      value={expenseForm.otherExpenses}
+                      onChange={e => setExpenseForm({...expenseForm, otherExpenses: e.target.value})}
+                      className="w-full p-3 pl-7 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm font-bold text-slate-800 dark:text-white"
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-3 bg-blue-50 dark:bg-blue-900/10 rounded-xl border border-blue-100 dark:border-blue-900/30 text-xs flex justify-between items-center">
+                <span className="block text-blue-600 dark:text-blue-400 font-bold uppercase">Total Expenses</span>
+                <span className="font-black text-blue-700 dark:text-blue-300 text-lg">
+                  ₹{((parseFloat(expenseForm.dieselExpense) || 0) + (parseFloat(expenseForm.driverBhatta) || 0) + (parseFloat(expenseForm.tollExpense) || 0) + (parseFloat(expenseForm.otherExpenses) || 0)).toLocaleString('en-IN')}
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowExpenseModal(null)}
+                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveExpenses}
+                disabled={isUpdating}
+                className="flex-[2] py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-bold flex justify-center items-center gap-2 transition-colors disabled:opacity-50"
+              >
+                {isUpdating ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+                Save Expenses
               </button>
             </div>
           </div>

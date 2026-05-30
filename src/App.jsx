@@ -19,7 +19,7 @@ import TruckDispatch from './TruckDispatch';
 import { ClipboardList } from 'lucide-react';
 import { initialProducts, shopDetails } from './data';
 import { db } from './firebase';
-import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, setDoc, doc, writeBatch } from 'firebase/firestore';
 
 function App() {
   const [activeTab, setActiveTab] = useState(() => {
@@ -28,7 +28,7 @@ function App() {
   const [appMode, setAppMode] = useState(() => {
     return localStorage.getItem('appMode') || 'retail';
   });
-  const [products, setProducts] = useState(initialProducts);
+  const [products, setProducts] = useState([]); // Products will be loaded from Firestore
   const [user, setUser] = useState(() => {
     const saved = localStorage.getItem('user');
     return saved ? JSON.parse(saved) : null;
@@ -269,6 +269,29 @@ function App() {
       unsubSales();
       unsubMortality();
     };
+  }, [user]);
+
+  // Sync retail_products
+  useEffect(() => {
+    if (!user) return;
+    const unsubProducts = onSnapshot(query(collection(db, 'retail_products'), orderBy('id')), async (snapshot) => {
+      if (snapshot.empty) {
+        // Seed database
+        const batch = writeBatch(db);
+        initialProducts.forEach(p => {
+          const docRef = doc(collection(db, 'retail_products'), p.id.toString());
+          batch.set(docRef, p);
+        });
+        await batch.commit();
+      } else {
+        const list = [];
+        snapshot.forEach(docSnap => {
+          list.push({ docId: docSnap.id, ...docSnap.data() });
+        });
+        setProducts(list);
+      }
+    });
+    return () => unsubProducts();
   }, [user]);
 
   useEffect(() => {
@@ -1407,7 +1430,7 @@ function SettingsPanel({ shopStatus, setShopStatus }) {
                             maxLength="19"
                             placeholder="Card Number (e.g. 4111 2222 3333 4444)"
                             value={cardNumber}
-                            onChange={(e) => setCardNumber(e.target.value.replace(/\s?/g, '').replace(/(\d{4})/g, '$1 ').trim())}
+                            onChange={(e) => setCardNumber(e.target.value.replace(/\s?/g, '').replace(/(\d{4})/g, '₹1 ').trim())}
                             className="w-full p-2.5 bg-[#0b1a30] border border-blue-900 rounded-lg text-sm text-white focus:outline-none focus:border-blue-500 font-mono"
                           />
                           <div className="grid grid-cols-2 gap-3">

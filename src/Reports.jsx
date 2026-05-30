@@ -37,6 +37,7 @@ export default function Reports() {
     gstin: shopDetails.gstin || '27AAAAA1111A1Z1'
   };
   const [reportType, setReportType] = useState('outstanding_balances');
+  const [reportCategory, setReportCategory] = useState('Financials');
   const [selectedSupplier, setSelectedSupplier] = useState('ALL');
   const [ledgerCategory, setLedgerCategory] = useState('ALL'); // 'ALL', 'CHICKEN', 'EGGS'
   const [dailyViewMode, setDailyViewMode] = useState('summary'); // 'summary' or 'details'
@@ -473,11 +474,86 @@ export default function Reports() {
     return Object.values(dailyData).sort((a, b) => b.dateStr.localeCompare(a.dateStr));
   };
 
+  // -------------------------------------------------------------
+  // DATA PROCESSING: ITEM-WISE SALES
+  // -------------------------------------------------------------
+  const generateItemWiseSales = () => {
+    const from = new Date(fromDate); from.setHours(0, 0, 0, 0);
+    const to = new Date(toDate); to.setHours(23, 59, 59, 999);
+
+    const items = {};
+    sales.forEach(sale => {
+      const saleDate = sale.timestamp ? sale.timestamp.toDate() : new Date();
+      if (isDateInRange(saleDate, from, to) && sale.items) {
+        sale.items.forEach(item => {
+          if (!items[item.productId]) {
+            items[item.productId] = {
+              name: item.productName,
+              unit: item.unit || 'kg',
+              totalQuantity: 0,
+              totalAmount: 0,
+              saleCount: 0
+            };
+          }
+          items[item.productId].totalQuantity += parseFloat(item.quantity) || 0;
+          items[item.productId].totalAmount += parseFloat(item.amount) || 0;
+          items[item.productId].saleCount += 1;
+        });
+      }
+    });
+
+    return Object.values(items).map(item => ({
+      ...item,
+      avgPrice: item.totalQuantity > 0 ? (item.totalAmount / item.totalQuantity).toFixed(2) : 0
+    })).sort((a, b) => b.totalAmount - a.totalAmount);
+  };
+
+  // -------------------------------------------------------------
+  // DATA PROCESSING: WORKER PERFORMANCE
+  // -------------------------------------------------------------
+  const generateWorkerPerformance = () => {
+    const from = new Date(fromDate); from.setHours(0, 0, 0, 0);
+    const to = new Date(toDate); to.setHours(23, 59, 59, 999);
+
+    const workers = {};
+    sales.forEach(sale => {
+      const saleDate = sale.timestamp ? sale.timestamp.toDate() : new Date();
+      if (isDateInRange(saleDate, from, to)) {
+        const workerName = sale.workerName || 'Unknown';
+        if (!workers[workerName]) {
+          workers[workerName] = {
+            name: workerName,
+            shift: sale.shift || 'Unknown',
+            billsCount: 0,
+            cashSales: 0,
+            upiSales: 0,
+            totalSales: 0,
+            discounts: 0
+          };
+        }
+        
+        workers[workerName].billsCount += 1;
+        workers[workerName].totalSales += sale.total || 0;
+        workers[workerName].discounts += sale.discount || 0;
+        
+        if (sale.paymentMethod === 'cash') {
+          workers[workerName].cashSales += sale.total || 0;
+        } else if (sale.paymentMethod === 'upi') {
+          workers[workerName].upiSales += sale.total || 0;
+        }
+      }
+    });
+
+    return Object.values(workers).sort((a, b) => b.totalSales - a.totalSales);
+  };
+
   // View Computations
   const outstandingData = reportType === 'outstanding_balances' ? generateOutstandingBalances() : [];
   const ledgerData = reportType === 'supplier_ledger' ? generateSupplierLedger() : { purchases: [], payments: [], openingBalance: 0, closingBalance: 0, totalPurchaseQty: 0, totalPurchaseWeight: 0, totalPurchaseAmount: 0, totalCollectionAmount: 0 };
   const rawData = reportType === 'stock_inward' ? generateRawStockInward() : [];
   const dailyTransactionsData = reportType === 'daily_transactions' ? generateDailyTransactions() : [];
+  const itemWiseSalesData = reportType === 'item_wise_sales' ? generateItemWiseSales() : [];
+  const workerPerformanceData = reportType === 'worker_performance' ? generateWorkerPerformance() : [];
 
   // Totals for Outstanding Balances
   const totalOutstandingDue = outstandingData.reduce((sum, s) => sum + s.netDue, 0);
@@ -494,6 +570,17 @@ export default function Reports() {
   const totalExpensesAudit = dailyTransactionsData.reduce((sum, d) => sum + d.expenses, 0);
   const totalSupplierPaymentsCashAudit = dailyTransactionsData.reduce((sum, d) => sum + d.supplierPaymentsCash, 0);
   const totalExpectedCashAudit = dailyTransactionsData.reduce((sum, d) => sum + d.expectedCash, 0);
+
+  // Totals for Item-Wise Sales
+  const totalItemWiseQuantity = itemWiseSalesData.reduce((sum, i) => sum + i.totalQuantity, 0);
+  const totalItemWiseAmount = itemWiseSalesData.reduce((sum, i) => sum + i.totalAmount, 0);
+
+  // Totals for Worker Performance
+  const totalWorkerBills = workerPerformanceData.reduce((sum, w) => sum + w.billsCount, 0);
+  const totalWorkerSales = workerPerformanceData.reduce((sum, w) => sum + w.totalSales, 0);
+  const totalWorkerCash = workerPerformanceData.reduce((sum, w) => sum + w.cashSales, 0);
+  const totalWorkerUpi = workerPerformanceData.reduce((sum, w) => sum + w.upiSales, 0);
+  const totalWorkerDiscounts = workerPerformanceData.reduce((sum, w) => sum + w.discounts, 0);
 
   // --- EXPORT FUNCTIONS ---
   const handlePrint = () => window.print();
@@ -660,6 +747,28 @@ export default function Reports() {
 
       autoTable(doc, { head: [tableColumn], body: tableRows, startY: 53, theme: 'grid', styles: { fontSize: 9 }, headStyles: { fillColor: [244, 63, 94] }});
     }
+    else if (reportType === 'item_wise_sales') {
+      doc.text('Item-wise Sales Report', 14, 41);
+      doc.setFontSize(10); doc.setTextColor(100); doc.text(`Period: ${formatDate(fromDate)} to ${formatDate(toDate)}`, 14, 47);
+
+      const tableColumn = ["Item Name", "Sale Count", "Total Qty/Weight", "Avg Price", "Total Revenue"];
+      const tableRows = itemWiseSalesData.map(item => [
+        item.name, item.saleCount, `${item.totalQuantity.toFixed(2)} ${item.unit}`, `₹${item.avgPrice}`, `₹${item.totalAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+      ]);
+      tableRows.push(['TOTAL', '-', '-', '-', `₹${totalItemWiseAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`]);
+      autoTable(doc, { head: [tableColumn], body: tableRows, startY: 53, theme: 'grid', styles: { fontSize: 9 }, headStyles: { fillColor: [244, 63, 94] }});
+    }
+    else if (reportType === 'worker_performance') {
+      doc.text('Worker Performance Report', 14, 41);
+      doc.setFontSize(10); doc.setTextColor(100); doc.text(`Period: ${formatDate(fromDate)} to ${formatDate(toDate)}`, 14, 47);
+
+      const tableColumn = ["Worker Name", "Shift", "Bills Generated", "Cash Collected", "UPI Collected", "Discounts", "Total Revenue"];
+      const tableRows = workerPerformanceData.map(w => [
+        w.name, w.shift, w.billsCount, `₹${w.cashSales.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`, `₹${w.upiSales.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`, `₹${w.discounts.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`, `₹${w.totalSales.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+      ]);
+      tableRows.push(['TOTAL', '-', totalWorkerBills, `₹${totalWorkerCash.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`, `₹${totalWorkerUpi.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`, `₹${totalWorkerDiscounts.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`, `₹${totalWorkerSales.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`]);
+      autoTable(doc, { head: [tableColumn], body: tableRows, startY: 53, theme: 'grid', styles: { fontSize: 9 }, headStyles: { fillColor: [244, 63, 94] }});
+    }
     else {
       doc.text('Stock Inward Report', 14, 41);
       doc.setFontSize(10); doc.setTextColor(100); doc.text(`Period: ${formatDate(fromDate)} to ${formatDate(toDate)}`, 14, 47);
@@ -756,6 +865,20 @@ export default function Reports() {
         totalExpectedCashAudit
       ]);
     }
+    else if (reportType === 'item_wise_sales') {
+      wsData.push(["Item Name", "Sale Count", "Total Qty/Weight", "Avg Price", "Total Revenue"]);
+      itemWiseSalesData.forEach(item => {
+        wsData.push([item.name, item.saleCount, `${item.totalQuantity.toFixed(2)} ${item.unit}`, item.avgPrice, item.totalAmount]);
+      });
+      wsData.push(['TOTAL', '', '', '', totalItemWiseAmount]);
+    }
+    else if (reportType === 'worker_performance') {
+      wsData.push(["Worker Name", "Shift", "Bills Generated", "Cash Collected", "UPI Collected", "Discounts", "Total Revenue"]);
+      workerPerformanceData.forEach(w => {
+        wsData.push([w.name, w.shift, w.billsCount, w.cashSales, w.upiSales, w.discounts, w.totalSales]);
+      });
+      wsData.push(['TOTAL', '', totalWorkerBills, totalWorkerCash, totalWorkerUpi, totalWorkerDiscounts, totalWorkerSales]);
+    }
     else {
       wsData.push(["Date", "Supplier", "Type", "Vehicle", "Birds/Pcs", "Weight/Qty", "Rate/Unit", "Payment", "Total Value"]);
       rawData.forEach(item => {
@@ -786,17 +909,54 @@ export default function Reports() {
           <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-end">
             <div className="flex flex-wrap gap-4 items-end w-full md:w-auto">
               
-              <div className="w-full md:w-56">
+              <div className="w-full">
+                {/* CATEGORY PILLS */}
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {['Financials', 'Logistics & Stock', 'Retail POS'].map(cat => (
+                    <button
+                      key={cat}
+                      onClick={() => {
+                        setReportCategory(cat);
+                        // Auto-select first report in category
+                        if (cat === 'Financials') setReportType('outstanding_balances');
+                        if (cat === 'Logistics & Stock') setReportType('stock_inward');
+                        if (cat === 'Retail POS') setReportType('item_wise_sales');
+                      }}
+                      className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
+                        reportCategory === cat 
+                          ? 'bg-primary-600 text-white shadow-md shadow-primary-500/20' 
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+
                 <label className="block text-sm font-medium text-slate-500 mb-1">Select Report</label>
                 <select 
-                  className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none font-medium"
+                  className="w-full md:w-64 p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none font-medium text-slate-800 dark:text-slate-200"
                   value={reportType}
                   onChange={(e) => setReportType(e.target.value)}
                 >
-                  <option value="outstanding_balances">Outstanding Balances (Master)</option>
-                  <option value="supplier_ledger">Supplier Ledger (Detailed)</option>
-                  <option value="stock_inward">Raw Stock Inward Data</option>
-                  <option value="daily_transactions">Daily Transactions (Audit & Tally)</option>
+                  {reportCategory === 'Financials' && (
+                    <>
+                      <option value="outstanding_balances">Outstanding Balances (Master)</option>
+                      <option value="supplier_ledger">Supplier Ledger (Detailed)</option>
+                      <option value="daily_transactions">Daily Transactions (Audit & Tally)</option>
+                    </>
+                  )}
+                  {reportCategory === 'Logistics & Stock' && (
+                    <>
+                      <option value="stock_inward">Raw Stock Inward Data</option>
+                    </>
+                  )}
+                  {reportCategory === 'Retail POS' && (
+                    <>
+                      <option value="item_wise_sales">Item-wise Sales Report (Retail)</option>
+                      <option value="worker_performance">Worker Performance (Retail)</option>
+                    </>
+                  )}
                 </select>
               </div>
 
@@ -1323,8 +1483,79 @@ export default function Reports() {
               )}
             </div>
           )}
+          {/* 5. ITEM-WISE SALES VIEW */}
+          {reportType === 'item_wise_sales' && (
+             <table className="w-full text-left border-collapse">
+             <thead>
+               <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 print:bg-slate-100">
+                 <th className="p-4 font-semibold text-slate-600">Item Name</th>
+                 <th className="p-4 font-semibold text-slate-600 text-center">Sale Count</th>
+                 <th className="p-4 font-semibold text-slate-600 text-right">Total Qty / Weight</th>
+                 <th className="p-4 font-semibold text-slate-600 text-right">Avg Price</th>
+                 <th className="p-4 font-bold text-slate-800 text-right">Total Revenue</th>
+               </tr>
+             </thead>
+             <tbody className="divide-y divide-slate-100 print:divide-slate-300">
+               {itemWiseSalesData.map(item => (
+                 <tr key={item.name} className="hover:bg-slate-50">
+                   <td className="p-4 font-medium">{item.name}</td>
+                   <td className="p-4 text-center">{item.saleCount}</td>
+                   <td className="p-4 text-right text-primary-600 font-medium">{item.totalQuantity.toFixed(2)} {item.unit}</td>
+                   <td className="p-4 text-right">₹{item.avgPrice}</td>
+                   <td className="p-4 text-right font-bold text-slate-800">₹{item.totalAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                 </tr>
+               ))}
+             </tbody>
+             <tfoot className="bg-slate-50 border-t-2 border-slate-200 print:bg-slate-100">
+               <tr>
+                 <td colSpan="2" className="p-4 font-bold">TOTALS:</td>
+                 <td className="p-4 text-right font-bold text-primary-600"></td>
+                 <td className="p-4"></td>
+                 <td className="p-4 text-right font-bold text-xl">₹{totalItemWiseAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+               </tr>
+             </tfoot>
+           </table>
+          )}
 
-
+          {/* 6. WORKER PERFORMANCE VIEW */}
+          {reportType === 'worker_performance' && (
+             <table className="w-full text-left border-collapse">
+             <thead>
+               <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 print:bg-slate-100">
+                 <th className="p-4 font-semibold text-slate-600">Worker Name</th>
+                 <th className="p-4 font-semibold text-slate-600">Shift</th>
+                 <th className="p-4 font-semibold text-slate-600 text-center">Bills Generated</th>
+                 <th className="p-4 font-semibold text-emerald-600 text-right">Cash Collected</th>
+                 <th className="p-4 font-semibold text-blue-600 text-right">UPI Collected</th>
+                 <th className="p-4 font-semibold text-rose-500 text-right">Discounts</th>
+                 <th className="p-4 font-bold text-slate-800 text-right">Total Revenue</th>
+               </tr>
+             </thead>
+             <tbody className="divide-y divide-slate-100 print:divide-slate-300">
+               {workerPerformanceData.map(w => (
+                 <tr key={w.name} className="hover:bg-slate-50">
+                   <td className="p-4 font-medium">{w.name}</td>
+                   <td className="p-4 text-slate-500 text-sm">{w.shift}</td>
+                   <td className="p-4 text-center">{w.billsCount}</td>
+                   <td className="p-4 text-right text-emerald-600 font-medium">₹{w.cashSales.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                   <td className="p-4 text-right text-blue-600 font-medium">₹{w.upiSales.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                   <td className="p-4 text-right text-rose-500">₹{w.discounts.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                   <td className="p-4 text-right font-bold text-slate-800">₹{w.totalSales.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                 </tr>
+               ))}
+             </tbody>
+             <tfoot className="bg-slate-50 border-t-2 border-slate-200 print:bg-slate-100">
+               <tr>
+                 <td colSpan="2" className="p-4 font-bold">TOTALS:</td>
+                 <td className="p-4 text-center font-bold">{totalWorkerBills}</td>
+                 <td className="p-4 text-right font-bold text-emerald-600">₹{totalWorkerCash.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                 <td className="p-4 text-right font-bold text-blue-600">₹{totalWorkerUpi.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                 <td className="p-4 text-right font-bold text-rose-500">₹{totalWorkerDiscounts.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                 <td className="p-4 text-right font-bold text-xl">₹{totalWorkerSales.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+               </tr>
+             </tfoot>
+           </table>
+          )}
 
         </div>
       </div>

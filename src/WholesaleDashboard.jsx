@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { db } from './firebase';
-import { collection, onSnapshot, query, orderBy, limit, doc, setDoc, getDoc } from 'firebase/firestore';
-import { DollarSign, Archive, UserCheck, TrendingUp, FileText, Compass, AlertTriangle, Sparkles, Map, IndianRupee, Save, RotateCcw, Loader2, Tag } from 'lucide-react';
+import { collection, onSnapshot, query, orderBy, limit, doc, setDoc, getDoc, addDoc } from 'firebase/firestore';
+import { DollarSign, Archive, UserCheck, TrendingUp, FileText, Compass, AlertTriangle, Sparkles, Map, IndianRupee, Save, RotateCcw, Loader2, Tag, Skull, Activity, PieChart as PieChartIcon } from 'lucide-react';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 
 export default function WholesaleDashboard({ products = [] }) {
   const [customers, setCustomers] = useState([]);
@@ -14,6 +15,11 @@ export default function WholesaleDashboard({ products = [] }) {
   const [rates, setRates] = useState({ chickenRate: '', eggsRate: '' });
   const [rateSaved, setRateSaved] = useState(false);
   const [isSavingRate, setIsSavingRate] = useState(false);
+
+  // Mortality state
+  const [showMortalityModal, setShowMortalityModal] = useState(false);
+  const [mortalityForm, setMortalityForm] = useState({ date: todayStr, weightKg: '', count: '', notes: '' });
+  const [isSavingMortality, setIsSavingMortality] = useState(false);
 
   // Fetch customers
   useEffect(() => {
@@ -77,6 +83,32 @@ export default function WholesaleDashboard({ products = [] }) {
     }
   };
 
+  const handleSaveMortality = async (e) => {
+    e.preventDefault();
+    if (!mortalityForm.weightKg || !mortalityForm.count) {
+      alert("Please enter both weight and count.");
+      return;
+    }
+    setIsSavingMortality(true);
+    try {
+      await addDoc(collection(db, 'wholesale_mortality'), {
+        date: mortalityForm.date,
+        weightKg: parseFloat(mortalityForm.weightKg),
+        count: parseInt(mortalityForm.count),
+        notes: mortalityForm.notes.trim(),
+        source: 'shop_floor',
+        timestamp: new Date().toISOString()
+      });
+      setShowMortalityModal(false);
+      setMortalityForm({ date: todayStr, weightKg: '', count: '', notes: '' });
+    } catch (err) {
+      console.error(err);
+      alert("Failed to log mortality.");
+    } finally {
+      setIsSavingMortality(false);
+    }
+  };
+
   // Compute stats
   const totalClients = customers.length;
   const totalOutstandingCredit = customers.reduce((acc, curr) => acc + (curr.outstandingBalance || 0), 0);
@@ -128,8 +160,81 @@ export default function WholesaleDashboard({ products = [] }) {
     return `${day}-${month}-${year}`;
   };
 
+  // --- CHART DATA COMPUTATION ---
+  
+  // 1. Sales Trend (Last 7 Days)
+  const last7Days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (6 - i));
+    return d.toISOString().split('T')[0];
+  });
+
+  const salesTrendData = last7Days.map(dateStr => {
+    const dayInvoices = invoices.filter(inv => inv.invoiceDate === dateStr);
+    const revenue = dayInvoices.reduce((acc, inv) => acc + (inv.totalValue || 0), 0);
+    const volume = dayInvoices.reduce((acc, inv) => {
+      let invVol = 0;
+      if (inv.items) {
+        invVol = inv.items.reduce((sum, item) => sum + (parseFloat(item.quantity) || 0), 0);
+      }
+      return acc + invVol;
+    }, 0);
+    
+    // Short date for x-axis
+    const [y, m, d] = dateStr.split('-');
+    return { date: `${d}/${m}`, revenue, volume, fullDate: dateStr };
+  });
+
+  // 2. Top Debtors (Top 5 + Others)
+  const debtorsSorted = [...customers]
+    .filter(c => (c.outstandingBalance || 0) > 0)
+    .sort((a, b) => b.outstandingBalance - a.outstandingBalance);
+    
+  let debtorsData = [];
+  if (debtorsSorted.length > 0) {
+    const top5 = debtorsSorted.slice(0, 5);
+    const others = debtorsSorted.slice(5).reduce((acc, c) => acc + c.outstandingBalance, 0);
+    
+    debtorsData = top5.map(c => ({ name: c.shopName.substring(0, 15), value: c.outstandingBalance }));
+    if (others > 0) {
+      debtorsData.push({ name: 'Others', value: others });
+    }
+  }
+
+  const COLORS = ['#f43f5e', '#f97316', '#eab308', '#84cc16', '#14b8a6', '#64748b'];
+
+  const CustomTooltip = ({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-white dark:bg-slate-800 p-3 rounded-lg shadow-lg border border-slate-100 dark:border-slate-700 text-xs text-left">
+          <p className="font-bold text-slate-800 dark:text-slate-200 mb-1">{label}</p>
+          {payload.map((entry, index) => (
+            <p key={index} style={{ color: entry.color }} className="font-medium">
+              {entry.name}: {entry.name === 'Revenue' || entry.name === 'value' ? '₹' : ''}
+              {Number(entry.value).toLocaleString('en-IN', { maximumFractionDigits: entry.name === 'Volume' ? 1 : 0 })} 
+              {entry.name === 'Volume' ? ' kg' : ''}
+            </p>
+          ))}
+        </div>
+      );
+    }
+    return null;
+  };
+
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-12 text-left">
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">Wholesale Dashboard</h2>
+        </div>
+        <button
+          onClick={() => setShowMortalityModal(true)}
+          className="flex items-center gap-2 bg-red-100 hover:bg-red-200 text-red-700 dark:bg-red-900/30 dark:hover:bg-red-900/50 dark:text-red-400 px-4 py-2 rounded-xl font-bold transition-colors text-sm"
+        >
+          <Skull className="w-4 h-4" />
+          Log Floor Mortality
+        </button>
+      </div>
 
       {/* Carry-Over Banner */}
       {dispatches.filter(d => d.status === 'carryover' && d.dispatchDate === todayStr).length > 0 && (
@@ -254,6 +359,135 @@ export default function WholesaleDashboard({ products = [] }) {
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-650 dark:bg-slate-800 dark:text-slate-350 uppercase">Active</span>
             </div>
             <p className="text-[10px] text-slate-500 mt-2 font-medium">Registered business accounts under directory</p>
+          </div>
+        </div>
+
+      </div>
+
+      {/* CHARTS SECTION */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* Sales Trend Chart */}
+        <div className="lg:col-span-2 glass-panel p-6 rounded-2xl bg-white dark:bg-slate-900/50 flex flex-col justify-between animate-in fade-in">
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+              <Activity className="w-5 h-5 text-emerald-500" /> 7-Day Revenue & Volume Trend
+            </h3>
+          </div>
+          <div className="h-[300px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={salesTrendData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148, 163, 184, 0.1)" />
+                <XAxis 
+                  dataKey="date" 
+                  tick={{ fontSize: 10, fill: '#94a3b8' }} 
+                  axisLine={false} 
+                  tickLine={false} 
+                  dy={10}
+                />
+                <YAxis 
+                  yAxisId="left" 
+                  tickFormatter={(val) => `₹${(val / 1000).toFixed(0)}k`} 
+                  tick={{ fontSize: 10, fill: '#94a3b8' }} 
+                  axisLine={false} 
+                  tickLine={false} 
+                  dx={-10}
+                />
+                <YAxis 
+                  yAxisId="right" 
+                  orientation="right" 
+                  tickFormatter={(val) => `${val}kg`} 
+                  tick={{ fontSize: 10, fill: '#94a3b8' }} 
+                  axisLine={false} 
+                  tickLine={false} 
+                  dx={10}
+                />
+                <Tooltip content={<CustomTooltip />} />
+                <Legend iconType="circle" wrapperStyle={{ fontSize: '11px', fontWeight: 'bold' }} />
+                <Line 
+                  yAxisId="left" 
+                  type="monotone" 
+                  dataKey="revenue" 
+                  name="Revenue" 
+                  stroke="#10b981" 
+                  strokeWidth={3} 
+                  dot={{ r: 4, strokeWidth: 2, fill: '#fff' }} 
+                  activeDot={{ r: 6, strokeWidth: 0 }} 
+                />
+                <Line 
+                  yAxisId="right" 
+                  type="monotone" 
+                  dataKey="volume" 
+                  name="Volume" 
+                  stroke="#3b82f6" 
+                  strokeWidth={3} 
+                  dot={{ r: 4, strokeWidth: 2, fill: '#fff' }} 
+                  activeDot={{ r: 6, strokeWidth: 0 }} 
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Top Debtors Pie Chart */}
+        <div className="glass-panel p-6 rounded-2xl bg-white dark:bg-slate-900/50 flex flex-col h-full animate-in fade-in">
+          <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-1.5">
+            <PieChartIcon className="w-5 h-5 text-rose-500" /> Credit Distribution
+          </h3>
+          <p className="text-xs text-slate-400 mb-4 text-left">Top 5 merchants by outstanding balance</p>
+          
+          <div className="flex-1 min-h-[250px] relative">
+            {debtorsData.length > 0 ? (
+              <>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={debtorsData}
+                      cx="50%"
+                      cy="45%"
+                      innerRadius={60}
+                      outerRadius={80}
+                      paddingAngle={5}
+                      dataKey="value"
+                      stroke="none"
+                    >
+                      {debtorsData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip content={<CustomTooltip />} />
+                  </PieChart>
+                </ResponsiveContainer>
+                
+                {/* Center text for donut */}
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none" style={{ top: '-10%' }}>
+                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Total</span>
+                  <span className="text-sm font-black text-rose-500">
+                    ₹{(totalOutstandingCredit / 1000).toFixed(1)}k
+                  </span>
+                </div>
+
+                {/* Custom slim legend */}
+                <div className="flex flex-col gap-1.5 mt-2 max-h-[80px] overflow-y-auto custom-scrollbar">
+                  {debtorsData.map((entry, idx) => (
+                    <div key={idx} className="flex items-center justify-between text-[10px]">
+                      <div className="flex items-center gap-1.5 truncate">
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></span>
+                        <span className="text-slate-600 dark:text-slate-300 font-medium truncate">{entry.name}</span>
+                      </div>
+                      <span className="font-bold text-slate-700 dark:text-slate-200">
+                        ₹{entry.value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-center text-slate-400">
+                <Archive className="w-8 h-8 mb-2 opacity-50" />
+                <p className="text-xs font-medium">No outstanding credit</p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -423,6 +657,81 @@ export default function WholesaleDashboard({ products = [] }) {
         </div>
 
       </div>
+
+      {/* Mortality Modal */}
+      {showMortalityModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-sm w-full border border-slate-200 dark:border-slate-800 shadow-2xl animate-in zoom-in-95 text-left">
+            <h3 className="font-bold text-lg text-slate-800 dark:text-white flex items-center gap-2 mb-4">
+              <Skull className="w-5 h-5 text-red-500" /> Log Floor Mortality
+            </h3>
+            
+            <form onSubmit={handleSaveMortality} className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Date</label>
+                <input
+                  type="date" required
+                  value={mortalityForm.date}
+                  onChange={e => setMortalityForm({ ...mortalityForm, date: e.target.value })}
+                  className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-red-500 text-sm font-semibold"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Total Wt (kg)</label>
+                  <input
+                    type="number" step="0.01" required
+                    value={mortalityForm.weightKg}
+                    onChange={e => setMortalityForm({ ...mortalityForm, weightKg: e.target.value })}
+                    className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-red-500 text-lg font-black text-red-600 dark:text-red-400"
+                    placeholder="0.0"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Bird Count</label>
+                  <input
+                    type="number" required
+                    value={mortalityForm.count}
+                    onChange={e => setMortalityForm({ ...mortalityForm, count: e.target.value })}
+                    className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-red-500 text-lg font-black text-red-600 dark:text-red-400"
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Reason / Notes</label>
+                <input
+                  type="text"
+                  value={mortalityForm.notes}
+                  onChange={e => setMortalityForm({ ...mortalityForm, notes: e.target.value })}
+                  className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-red-500 text-sm"
+                  placeholder="e.g. Found dead in morning"
+                />
+              </div>
+
+              <div className="mt-6 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowMortalityModal(false)}
+                  className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingMortality}
+                  className="flex-[2] py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold flex justify-center items-center gap-2 transition-colors disabled:opacity-50"
+                >
+                  {isSavingMortality ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+                  Save Record
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1055,7 +1055,7 @@ export default function DeveloperCRM({ user, onLogout }) {
                             maxLength="19"
                             placeholder="Card Number (e.g. 4111 2222 3333 4444)"
                             value={cardNumber}
-                            onChange={(e) => setCardNumber(e.target.value.replace(/\s?/g, '').replace(/(\d{4})/g, '$1 ').trim())}
+                            onChange={(e) => setCardNumber(e.target.value.replace(/\s?/g, '').replace(/(\d{4})/g, '₹1 ').trim())}
                             className="w-full p-2.5 bg-[#0b1a30] border border-blue-900 rounded-lg text-sm text-white focus:outline-none focus:border-rose-500 font-mono"
                           />
                           <div className="grid grid-cols-2 gap-3">

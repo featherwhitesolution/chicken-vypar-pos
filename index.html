@@ -4,6 +4,15 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/logo.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="theme-color" content="#ffffff">
+    <script>
+      window.addEventListener('error', function(e) {
+        var errDiv = document.createElement('div');
+        errDiv.style.cssText = 'position:fixed;top:0;left:0;right:0;background:red;color:white;z-index:9999;padding:20px;font-family:sans-serif;white-space:pre-wrap;';
+        errDiv.textContent = 'Global Error: ' + e.message + '\n' + (e.error ? e.error.stack : '');
+        document.body.appendChild(errDiv);
+      });
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Chicken Shop Management & Billing Application" />
     <title>Chicken Vypar</title>

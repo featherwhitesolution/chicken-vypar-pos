@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, Download, Printer, User, Filter, AlertCircle, DollarSign, Package, Box, Truck, BarChart2 } from 'lucide-react';
+import { FileText, Download, Printer, User, Filter, AlertCircle, IndianRupee, Package, Box, Truck, BarChart2 } from 'lucide-react';
 import { db } from './firebase';
 import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 import { jsPDF } from 'jspdf';
@@ -32,6 +32,10 @@ export default function WholesaleReports() {
   const [customers, setCustomers] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [collections, setCollections] = useState([]);
+  const [farmInwards, setFarmInwards] = useState([]);
+  const [truckDispatches, setTruckDispatches] = useState([]);
+  const [mortalityLogs, setMortalityLogs] = useState([]);
+  const [cratesLedger, setCratesLedger] = useState([]);
 
   // Fetch Data
   useEffect(() => {
@@ -58,10 +62,46 @@ export default function WholesaleReports() {
       setCollections(list);
     });
 
+    // Farm Inwards (Procurement)
+    const qFarm = query(collection(db, 'farm_inwards'), orderBy('date', 'desc'));
+    const unsubFarm = onSnapshot(qFarm, (snapshot) => {
+      const list = [];
+      snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
+      setFarmInwards(list);
+    });
+
+    // Truck Dispatches
+    const qTruck = query(collection(db, 'truck_dispatches'), orderBy('dispatchDate', 'desc'));
+    const unsubTruck = onSnapshot(qTruck, (snapshot) => {
+      const list = [];
+      snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
+      setTruckDispatches(list);
+    });
+
+    // Mortality Logs
+    const qMort = query(collection(db, 'wholesale_mortality'), orderBy('date', 'desc'));
+    const unsubMort = onSnapshot(qMort, (snapshot) => {
+      const list = [];
+      snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
+      setMortalityLogs(list);
+    });
+
+    // Crates Ledger
+    const qCrates = query(collection(db, 'crates_ledger'), orderBy('timestamp', 'desc'));
+    const unsubCrates = onSnapshot(qCrates, (snapshot) => {
+      const list = [];
+      snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
+      setCratesLedger(list);
+    });
+
     return () => {
       unsubCust();
       unsubInv();
       unsubColl();
+      unsubFarm();
+      unsubTruck();
+      unsubMort();
+      unsubCrates();
     };
   }, []);
 
@@ -238,6 +278,368 @@ export default function WholesaleReports() {
 
   const cashFlowData = reportType === 'cash_flow' ? generateCashFlow() : null;
 
+  // -------------------------------------------------------------
+  // DATA PROCESSING: REVENUE BY CATEGORY
+  // -------------------------------------------------------------
+  const generateRevenueCategory = () => {
+    const from = new Date(fromDate); from.setHours(0, 0, 0, 0);
+    const to = new Date(toDate); to.setHours(23, 59, 59, 999);
+    
+    const filteredInvoices = invoices.filter(inv => {
+      const d = new Date(inv.timestamp || inv.date);
+      return d >= from && d <= to;
+    });
+
+    let liveChickenRevenue = 0;
+    let liveChickenKg = 0;
+    let eggsRevenue = 0;
+    let eggsQty = 0;
+
+    filteredInvoices.forEach(inv => {
+      if (inv.items && Array.isArray(inv.items)) {
+        inv.items.forEach(item => {
+          if (item.productId === 1 || item.name?.toLowerCase().includes('chicken')) { // Live Chicken
+            liveChickenRevenue += (parseFloat(item.amount) || 0);
+            liveChickenKg += (parseFloat(item.quantity) || 0);
+          } else if (item.productId === 16 || item.name?.toLowerCase().includes('egg')) { // Eggs
+            eggsRevenue += (parseFloat(item.amount) || 0);
+            eggsQty += (parseFloat(item.quantity) || 0);
+          }
+        });
+      }
+    });
+
+    const totalRevenue = liveChickenRevenue + eggsRevenue;
+
+    return {
+      liveChicken: { 
+        revenue: liveChickenRevenue, 
+        qty: liveChickenKg, 
+        percentage: totalRevenue > 0 ? ((liveChickenRevenue/totalRevenue)*100).toFixed(1) : 0 
+      },
+      eggs: { 
+        revenue: eggsRevenue, 
+        qty: eggsQty, 
+        percentage: totalRevenue > 0 ? ((eggsRevenue/totalRevenue)*100).toFixed(1) : 0 
+      },
+      totalRevenue
+    };
+  };
+
+  const revenueCategoryData = reportType === 'revenue_category' ? generateRevenueCategory() : null;
+
+  // -------------------------------------------------------------
+  // DATA PROCESSING: PROCUREMENT VS DISPATCH (YIELD)
+  // -------------------------------------------------------------
+  const generateYieldReport = () => {
+    const from = new Date(fromDate); from.setHours(0, 0, 0, 0);
+    const to = new Date(toDate); to.setHours(23, 59, 59, 999);
+
+    const fInwards = farmInwards.filter(f => isDateInRange(new Date(f.timestamp || f.date), from, to));
+    const invs = invoices.filter(i => isDateInRange(new Date(i.timestamp || i.date), from, to));
+    const mort = mortalityLogs.filter(m => isDateInRange(new Date(m.timestamp || m.date), from, to));
+
+    const totalProcuredKg = fInwards.reduce((acc, curr) => acc + (parseFloat(curr.netWeight) || 0), 0);
+    const totalSoldKg = invs.reduce((acc, curr) => {
+      let kg = 0;
+      if (curr.items) {
+        curr.items.forEach(item => {
+          if (item.productId === 1 || item.name?.toLowerCase().includes('chicken')) {
+            kg += (parseFloat(item.quantity) || 0);
+          }
+        });
+      }
+      return acc + kg;
+    }, 0);
+    
+    // Total mortality across all sources (inwards + truck partials + shop floor)
+    // Wait, the inwards mortality is already in netWeight (it deducts deadBirdsWeight?), 
+    // actually we should just sum the explicit mortality logs + farm inward dead weight.
+    let totalMortalityKg = mort.reduce((acc, curr) => acc + (parseFloat(curr.weightKg) || 0), 0);
+    totalMortalityKg += fInwards.reduce((acc, curr) => acc + (parseFloat(curr.deadBirdsWeight) || 0), 0);
+    
+    // Truck mortality from partial sales is not explicitly in a central collection unless we add it to wholesale_mortality.
+    // For now, calculate yield from known inputs:
+    const shrinkageKg = Math.max(0, totalProcuredKg - totalSoldKg - totalMortalityKg);
+    const yieldPercentage = totalProcuredKg > 0 ? ((totalSoldKg / totalProcuredKg) * 100).toFixed(1) : 0;
+
+    return {
+      procuredKg: totalProcuredKg,
+      soldKg: totalSoldKg,
+      mortalityKg: totalMortalityKg,
+      shrinkageKg: shrinkageKg,
+      yieldPercentage: yieldPercentage
+    };
+  };
+
+  const yieldData = reportType === 'yield' ? generateYieldReport() : null;
+
+  // -------------------------------------------------------------
+  // DATA PROCESSING: CARRY-OVER ANALYSIS
+  // -------------------------------------------------------------
+  const generateCarryOverReport = () => {
+    const from = new Date(fromDate); from.setHours(0, 0, 0, 0);
+    const to = new Date(toDate); to.setHours(23, 59, 59, 999);
+
+    const carryOvers = truckDispatches.filter(d => 
+      (d.status === 'carryover' || d.isCarryOver) && 
+      isDateInRange(new Date(d.createdAt || d.dispatchDate), from, to)
+    );
+
+    let totalCarryOverKg = 0;
+    const list = carryOvers.map(co => {
+      const kg = parseFloat(co.remainingWeightKg) || 0;
+      totalCarryOverKg += kg;
+      return {
+        id: co.id,
+        date: co.dispatchDate,
+        truckNumber: co.truckNumber,
+        driverName: co.driverName,
+        carryOverKg: kg,
+        lockedRate: co.ratePerKg || 0,
+        originalDate: co.carryOverDate || 'N/A'
+      };
+    }).sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    return { list, totalCarryOverKg };
+  };
+
+  const carryOverData = reportType === 'carry_over' ? generateCarryOverReport() : null;
+
+  // -------------------------------------------------------------
+  // DATA PROCESSING: DAILY MORTALITY REPORT
+  // -------------------------------------------------------------
+  const generateMortalityReport = () => {
+    const from = new Date(fromDate); from.setHours(0, 0, 0, 0);
+    const to = new Date(toDate); to.setHours(23, 59, 59, 999);
+
+    const fInwards = farmInwards.filter(f => isDateInRange(new Date(f.timestamp || f.date), from, to) && parseFloat(f.deadBirdsWeight) > 0);
+    const shopFloor = mortalityLogs.filter(m => isDateInRange(new Date(m.timestamp || m.date), from, to));
+    
+    // Truck dispatches with mortality
+    const truckMort = truckDispatches.filter(d => 
+      isDateInRange(new Date(d.updatedAt || d.dispatchDate), from, to) && parseFloat(d.deadBirdsWeightKg) > 0
+    );
+
+    let list = [];
+    let totalMortalityKg = 0;
+    let totalMortalityCount = 0;
+
+    fInwards.forEach(f => {
+      const w = parseFloat(f.deadBirdsWeight) || 0;
+      const c = parseInt(f.transitMortality) || 0; // Or whatever farm inward uses
+      totalMortalityKg += w;
+      totalMortalityCount += c;
+      list.push({ date: f.date, source: 'Farm Inward (DOA)', details: `Vehicle: ${f.vehicleNo}`, weightKg: w, count: c });
+    });
+
+    shopFloor.forEach(m => {
+      const w = parseFloat(m.weightKg) || 0;
+      const c = parseInt(m.count) || 0;
+      totalMortalityKg += w;
+      totalMortalityCount += c;
+      list.push({ date: m.date, source: 'Shop Floor', details: m.notes || '-', weightKg: w, count: c });
+    });
+
+    truckMort.forEach(t => {
+      const w = parseFloat(t.deadBirdsWeightKg) || 0;
+      const c = parseInt(t.deadBirdsCount) || 0;
+      totalMortalityKg += w;
+      totalMortalityCount += c;
+      list.push({ date: t.dispatchDate, source: 'Truck Route', details: `Truck: ${t.truckNumber}`, weightKg: w, count: c });
+    });
+
+    list.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    return { list, totalMortalityKg, totalMortalityCount };
+  };
+
+  const mortalityData = reportType === 'mortality' ? generateMortalityReport() : null;
+
+  // -------------------------------------------------------------
+  // DATA PROCESSING: OUTSTANDING CRATES BY MERCHANT
+  // -------------------------------------------------------------
+  const generateOutstandingCratesReport = () => {
+    const list = customers
+      .filter(c => (c.outstandingCrates || 0) > 0)
+      .map(c => ({
+        id: c.id,
+        shopName: c.shopName,
+        phone: c.phone || '-',
+        route: c.route || '-',
+        outstandingCrates: c.outstandingCrates
+      }))
+      .sort((a, b) => b.outstandingCrates - a.outstandingCrates);
+    
+    const totalOutstanding = list.reduce((sum, item) => sum + item.outstandingCrates, 0);
+    return { list, totalOutstanding };
+  };
+
+  const outstandingCratesData = reportType === 'outstanding_crates' ? generateOutstandingCratesReport() : null;
+
+  // -------------------------------------------------------------
+  // DATA PROCESSING: CRATE AGING REPORT (FIFO ESTIMATION)
+  // -------------------------------------------------------------
+  const generateCrateAgingReport = () => {
+    const list = [];
+    customers.filter(c => (c.outstandingCrates || 0) > 0).forEach(customer => {
+      let remaining = customer.outstandingCrates;
+      const custTxs = cratesLedger
+        .filter(tx => tx.customerId === customer.id && (tx.cratesIssued || 0) > 0)
+        .sort((a, b) => new Date(b.timestamp || b.date) - new Date(a.timestamp || a.date)); // Newest first
+
+      let olderThan7 = 0;
+      let olderThan15 = 0;
+      let olderThan30 = 0;
+      const today = new Date();
+
+      // Go backwards in time assigning remaining crates to issues
+      for (const tx of custTxs) {
+        if (remaining <= 0) break;
+        const issued = tx.cratesIssued || 0;
+        const ageInDays = Math.floor((today - new Date(tx.timestamp || tx.date)) / (1000 * 60 * 60 * 24));
+        const assigned = Math.min(remaining, issued);
+        
+        if (ageInDays > 30) olderThan30 += assigned;
+        else if (ageInDays > 15) olderThan15 += assigned;
+        else if (ageInDays > 7) olderThan7 += assigned;
+        
+        remaining -= assigned;
+      }
+      
+      // If there are still remaining crates but no txs found, dump them into oldest bucket
+      if (remaining > 0) {
+         olderThan30 += remaining;
+      }
+
+      list.push({
+        id: customer.id,
+        shopName: customer.shopName,
+        total: customer.outstandingCrates,
+        olderThan7,
+        olderThan15,
+        olderThan30
+      });
+    });
+
+    return { 
+      list: list.sort((a, b) => b.total - a.total),
+      totals: {
+        total: list.reduce((acc, c) => acc + c.total, 0),
+        olderThan7: list.reduce((acc, c) => acc + c.olderThan7, 0),
+        olderThan15: list.reduce((acc, c) => acc + c.olderThan15, 0),
+        olderThan30: list.reduce((acc, c) => acc + c.olderThan30, 0)
+      }
+    };
+  };
+
+  const crateAgingData = reportType === 'crate_aging' ? generateCrateAgingReport() : null;
+
+  // -------------------------------------------------------------
+  // DATA PROCESSING: TRUCK DAILY SETTLEMENT
+  // -------------------------------------------------------------
+  const generateTruckSettlementReport = () => {
+    const from = new Date(fromDate); from.setHours(0, 0, 0, 0);
+    const to = new Date(toDate); to.setHours(23, 59, 59, 999);
+
+    const dispatches = truckDispatches.filter(d => isDateInRange(new Date(d.dispatchDate), from, to));
+    
+    let totalRevenue = 0;
+    let totalExpenses = 0;
+    
+    const list = dispatches.map(d => {
+      const expenses = (parseFloat(d.dieselExpense) || 0) + (parseFloat(d.driverBhatta) || 0) + (parseFloat(d.tollExpense) || 0) + (parseFloat(d.otherExpenses) || 0);
+      const cash = parseFloat(d.cashCollected) || 0;
+      
+      totalExpenses += expenses;
+      totalRevenue += cash; // Using cash collected as proxy for settlement cash
+
+      return {
+        id: d.id,
+        date: d.dispatchDate,
+        truckNumber: d.truckNumber,
+        driverName: d.driverName,
+        status: d.status,
+        expenses,
+        cash,
+        mortalityKg: parseFloat(d.deadBirdsWeightKg) || 0,
+        carryOverKg: parseFloat(d.remainingWeightKg) || 0
+      };
+    }).sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    return { list, totalRevenue, totalExpenses };
+  };
+
+  const truckSettlementData = reportType === 'truck_settlement' ? generateTruckSettlementReport() : null;
+
+  // -------------------------------------------------------------
+  // DATA PROCESSING: TOP MERCHANTS / DEFAULTERS
+  // -------------------------------------------------------------
+  const generateTopMerchantsReport = () => {
+    const from = new Date(fromDate); from.setHours(0, 0, 0, 0);
+    const to = new Date(toDate); to.setHours(23, 59, 59, 999);
+    
+    // Top by Volume/Revenue in period
+    const merchantStats = {};
+    invoices.filter(i => isDateInRange(new Date(i.timestamp || i.date), from, to)).forEach(inv => {
+      if (!merchantStats[inv.customerId]) {
+        merchantStats[inv.customerId] = { revenue: 0, volume: 0 };
+      }
+      merchantStats[inv.customerId].revenue += (parseFloat(inv.totalValue) || 0);
+      if (inv.items) {
+        inv.items.forEach(item => {
+          merchantStats[inv.customerId].volume += (parseFloat(item.quantity) || 0);
+        });
+      }
+    });
+
+    const topMerchants = Object.keys(merchantStats).map(id => {
+      const c = customers.find(x => x.id === id);
+      return {
+        id,
+        shopName: c ? c.shopName : 'Unknown',
+        revenue: merchantStats[id].revenue,
+        volume: merchantStats[id].volume
+      };
+    }).sort((a, b) => b.revenue - a.revenue).slice(0, 10); // Top 10
+
+    // Defaulters (highest outstanding + oldest payment)
+    const defaulters = customers
+      .filter(c => (c.outstandingBalance || 0) > 0)
+      .map(c => {
+        const cPayments = collections.filter(col => col.customerId === c.id).sort((a, b) => {
+          return new Date(b.timestamp || b.date) - new Date(a.timestamp || a.date);
+        });
+        const lastPaymentDate = cPayments.length > 0 ? (cPayments[0].timestamp || cPayments[0].date) : null;
+        let daysSincePayment = -1;
+        if (lastPaymentDate) {
+          daysSincePayment = Math.floor((new Date() - new Date(lastPaymentDate)) / (1000 * 60 * 60 * 24));
+        } else {
+          // If they never paid, assume max risk (using an arbitrary large number or just sorting them high)
+          daysSincePayment = 999;
+        }
+
+        return {
+          id: c.id,
+          shopName: c.shopName,
+          balance: c.outstandingBalance,
+          lastPaymentDate,
+          daysSincePayment
+        };
+      })
+      // Sort by combination of days since payment and balance size
+      .sort((a, b) => {
+        if (b.daysSincePayment !== a.daysSincePayment) {
+          return b.daysSincePayment - a.daysSincePayment;
+        }
+        return b.balance - a.balance;
+      }).slice(0, 10);
+
+    return { topMerchants, defaulters };
+  };
+
+  const topMerchantsData = reportType === 'top_merchants' ? generateTopMerchantsReport() : null;
+
   // --- EXPORT FUNCTIONS ---
   const activeShop = {
     shopName: shopDetails.name,
@@ -308,10 +710,90 @@ export default function WholesaleReports() {
       return;
     }
 
-    if (selectedCustomer === 'ALL') {
-      alert("Please select a specific retailer to generate a ledger statement.");
+    if (reportType === 'outstanding_crates') {
+      const doc = new jsPDF('portrait');
+      doc.setFontSize(18); doc.text(activeShop.shopName, 14, 20);
+      doc.setFontSize(14); doc.setTextColor(40);
+      doc.text(`Outstanding Crates by Merchant`, 14, 30);
+      doc.setFontSize(10); doc.setTextColor(100); doc.text(`Date: ${formatDate(new Date().toISOString())}`, 14, 36);
+      doc.text(`Total Outstanding: ${outstandingCratesData.totalOutstanding} crates`, 14, 42);
+
+      const tableCol = ["#", "Merchant Name", "Contact", "Route", "Outstanding Crates"];
+      const tableRows = outstandingCratesData.list.map((m, idx) => [
+        idx + 1, m.shopName, m.phone, m.route, m.outstandingCrates
+      ]);
+
+      autoTable(doc, { head: [tableCol], body: tableRows, startY: 48, theme: 'grid', styles: { fontSize: 9 }, headStyles: { fillColor: [245, 158, 11] } });
+      doc.save(`Outstanding_Crates_${new Date().toISOString().split('T')[0]}.pdf`);
       return;
     }
+
+    if (reportType === 'crate_aging') {
+      const doc = new jsPDF('portrait');
+      doc.setFontSize(18); doc.text(activeShop.shopName, 14, 20);
+      doc.setFontSize(14); doc.setTextColor(40);
+      doc.text(`Crate Aging Report`, 14, 30);
+      doc.setFontSize(10); doc.setTextColor(100); doc.text(`Date: ${formatDate(new Date().toISOString())}`, 14, 36);
+
+      const tableCol = ["Merchant Name", "Total Held", "7-15 Days", "16-30 Days", ">30 Days"];
+      const tableRows = crateAgingData.list.map(m => [
+        m.shopName, m.total, m.olderThan7 || '-', m.olderThan15 || '-', m.olderThan30 || '-'
+      ]);
+      tableRows.push(['TOTAL', crateAgingData.totals.total, crateAgingData.totals.olderThan7, crateAgingData.totals.olderThan15, crateAgingData.totals.olderThan30]);
+
+      autoTable(doc, { head: [tableCol], body: tableRows, startY: 42, theme: 'grid', styles: { fontSize: 9 }, headStyles: { fillColor: [245, 158, 11] } });
+      doc.save(`Crate_Aging_${new Date().toISOString().split('T')[0]}.pdf`);
+      return;
+    }
+
+    if (reportType === 'truck_settlement') {
+      const doc = new jsPDF('landscape');
+      doc.setFontSize(18); doc.text(activeShop.shopName, 14, 20);
+      doc.setFontSize(14); doc.setTextColor(40);
+      doc.text(`Truck Daily Settlement`, 14, 30);
+      doc.setFontSize(10); doc.setTextColor(100); doc.text(`Period: ${formatDate(fromDate)} to ${formatDate(toDate)}`, 14, 36);
+
+      const tableCol = ["Date", "Truck / Driver", "Expenses (Rs)", "Mortality Kg", "Carry-Over Kg", "Cash Collected (Rs)"];
+      const tableRows = truckSettlementData.list.map(t => [
+        formatDate(t.date), `${t.truckNumber} / ${t.driverName}`, t.expenses.toLocaleString('en-IN'), t.mortalityKg || '-', t.carryOverKg || '-', t.cash.toLocaleString('en-IN')
+      ]);
+
+      autoTable(doc, { head: [tableCol], body: tableRows, startY: 42, theme: 'grid', styles: { fontSize: 9 }, headStyles: { fillColor: [59, 130, 246] } });
+      doc.save(`Truck_Settlement_${formatDate(fromDate)}.pdf`);
+      return;
+    }
+
+    if (reportType === 'top_merchants') {
+      const doc = new jsPDF('portrait');
+      doc.setFontSize(18); doc.text(activeShop.shopName, 14, 20);
+      doc.setFontSize(14); doc.setTextColor(40);
+      doc.text(`Top Merchants / Defaulters`, 14, 30);
+      doc.setFontSize(10); doc.setTextColor(100); doc.text(`Period: ${formatDate(fromDate)} to ${formatDate(toDate)}`, 14, 36);
+
+      doc.text("Top 10 Merchants (By Revenue)", 14, 46);
+      const topCol = ["Rank", "Merchant", "Volume (Kg)", "Revenue (Rs)"];
+      const topRows = topMerchantsData.topMerchants.map((m, idx) => [
+        idx + 1, m.shopName, m.volume.toLocaleString('en-IN'), m.revenue.toLocaleString('en-IN')
+      ]);
+      autoTable(doc, { head: [topCol], body: topRows, startY: 50, theme: 'grid', styles: { fontSize: 9 }, headStyles: { fillColor: [16, 185, 129] } });
+
+      const finalY = doc.lastAutoTable.finalY + 10;
+      doc.text("Critical Defaulters", 14, finalY);
+      const defCol = ["Rank", "Merchant", "Last Payment", "Outstanding (Rs)"];
+      const defRows = topMerchantsData.defaulters.map((m, idx) => [
+        idx + 1, m.shopName, m.lastPaymentDate ? formatDate(m.lastPaymentDate) : 'Never', m.balance.toLocaleString('en-IN')
+      ]);
+      autoTable(doc, { head: [defCol], body: defRows, startY: finalY + 4, theme: 'grid', styles: { fontSize: 9 }, headStyles: { fillColor: [244, 63, 94] } });
+
+      doc.save(`Merchants_Report_${formatDate(fromDate)}.pdf`);
+      return;
+    }
+
+    if (reportType === 'retailer_ledger') {
+      if (selectedCustomer === 'ALL') {
+        alert("Please select a specific retailer to generate a ledger statement.");
+        return;
+      }
 
     const doc = new jsPDF('landscape');
     const customer = customers.find(c => c.id === selectedCustomer);
@@ -394,7 +876,88 @@ export default function WholesaleReports() {
     doc.text("Retailer Sign", 210, finalY + 40);
     doc.line(210, finalY + 37, 240, finalY + 37);
 
-    doc.save(`Wholesale_Statement_${customerName.replace(/\s+/g, '_')}_${fromDate}.pdf`);
+      doc.save(`Wholesale_Statement_${customerName.replace(/\s+/g, '_')}_${fromDate}.pdf`);
+      return;
+    }
+
+    if (reportType === 'revenue_category') {
+      const doc = new jsPDF('portrait');
+      doc.setFontSize(18); doc.text(activeShop.shopName, 14, 20);
+      doc.setFontSize(14); doc.setTextColor(40);
+      doc.text(`Revenue by Category`, 14, 30);
+      doc.setFontSize(10); doc.setTextColor(100); doc.text(`Period: ${formatDate(fromDate)} to ${formatDate(toDate)}`, 14, 36);
+
+      const tableCol = ["Category", "Quantity Sold", "Revenue (Rs)", "% Share"];
+      const tableRows = [
+        ["Live Chicken", `${revenueCategoryData.liveChicken.qty.toLocaleString('en-IN', {maximumFractionDigits: 1})} kg`, `Rs. ${revenueCategoryData.liveChicken.revenue.toLocaleString('en-IN')}`, `${revenueCategoryData.liveChicken.percentage}%`],
+        ["Eggs", `${revenueCategoryData.eggs.qty.toLocaleString('en-IN', {maximumFractionDigits: 1})} pcs`, `Rs. ${revenueCategoryData.eggs.revenue.toLocaleString('en-IN')}`, `${revenueCategoryData.eggs.percentage}%`],
+        ["TOTAL", "-", `Rs. ${revenueCategoryData.totalRevenue.toLocaleString('en-IN')}`, "100%"]
+      ];
+
+      autoTable(doc, { head: [tableCol], body: tableRows, startY: 42, theme: 'grid', styles: { fontSize: 9 }, headStyles: { fillColor: [16, 185, 129] } });
+      doc.save(`Revenue_Category_${formatDate(fromDate)}.pdf`);
+      return;
+    }
+
+    if (reportType === 'yield') {
+      const doc = new jsPDF('portrait');
+      doc.setFontSize(18); doc.text(activeShop.shopName, 14, 20);
+      doc.setFontSize(14); doc.setTextColor(40); doc.text(`Procurement vs Dispatch (Yield)`, 14, 30);
+      doc.setFontSize(10); doc.setTextColor(100); doc.text(`Period: ${formatDate(fromDate)} to ${formatDate(toDate)}`, 14, 36);
+
+      const tableCol = ["Metric", "Weight (Kg)"];
+      const tableRows = [
+        ["Total Procured (Inward)", yieldData.procuredKg.toLocaleString('en-IN', {maximumFractionDigits: 1})],
+        ["Total Sold (Outward)", yieldData.soldKg.toLocaleString('en-IN', {maximumFractionDigits: 1})],
+        ["Recorded Mortality", yieldData.mortalityKg.toLocaleString('en-IN', {maximumFractionDigits: 1})],
+        ["Unaccounted Shrinkage", yieldData.shrinkageKg.toLocaleString('en-IN', {maximumFractionDigits: 1})]
+      ];
+
+      autoTable(doc, { head: [tableCol], body: tableRows, startY: 42, theme: 'grid', styles: { fontSize: 10 }, headStyles: { fillColor: [59, 130, 246] } });
+      
+      const finalY = doc.lastAutoTable.finalY + 10;
+      doc.setFontSize(12); doc.setTextColor(20); doc.setFont("helvetica", "bold");
+      doc.text(`Estimated Yield: ${yieldData.yieldPercentage}%`, 14, finalY);
+      
+      doc.save(`Yield_Report_${formatDate(fromDate)}.pdf`);
+      return;
+    }
+
+    if (reportType === 'carry_over') {
+      const doc = new jsPDF('portrait');
+      doc.setFontSize(18); doc.text(activeShop.shopName, 14, 20);
+      doc.setFontSize(14); doc.setTextColor(40); doc.text(`Carry-Over Analysis`, 14, 30);
+      doc.setFontSize(10); doc.setTextColor(100); doc.text(`Period: ${formatDate(fromDate)} to ${formatDate(toDate)}`, 14, 36);
+
+      const tableCol = ["Date", "Truck Number", "Driver", "Original Date", "Carry-Over Kg"];
+      const tableRows = carryOverData.list.map(c => [
+        formatDate(c.date), c.truckNumber, c.driverName, c.originalDate !== 'N/A' ? formatDate(c.originalDate) : 'N/A', c.carryOverKg.toLocaleString('en-IN', {maximumFractionDigits: 1})
+      ]);
+      tableRows.push(['TOTAL', '', '', '', carryOverData.totalCarryOverKg.toLocaleString('en-IN', {maximumFractionDigits: 1})]);
+
+      autoTable(doc, { head: [tableCol], body: tableRows, startY: 42, theme: 'grid', styles: { fontSize: 9 }, headStyles: { fillColor: [245, 158, 11] } });
+      doc.save(`Carry_Over_${formatDate(fromDate)}.pdf`);
+      return;
+    }
+
+    if (reportType === 'mortality') {
+      const doc = new jsPDF('portrait');
+      doc.setFontSize(18); doc.text(activeShop.shopName, 14, 20);
+      doc.setFontSize(14); doc.setTextColor(40); doc.text(`Daily Mortality Report`, 14, 30);
+      doc.setFontSize(10); doc.setTextColor(100); doc.text(`Period: ${formatDate(fromDate)} to ${formatDate(toDate)}`, 14, 36);
+
+      const tableCol = ["Date", "Source", "Details", "Count", "Weight (Kg)"];
+      const tableRows = mortalityData.list.map(m => [
+        formatDate(m.date), m.source, m.details, m.count, m.weightKg.toLocaleString('en-IN', {maximumFractionDigits: 1})
+      ]);
+      tableRows.push(['TOTAL', '', '', mortalityData.totalMortalityCount, mortalityData.totalMortalityKg.toLocaleString('en-IN', {maximumFractionDigits: 1})]);
+
+      autoTable(doc, { head: [tableCol], body: tableRows, startY: 42, theme: 'grid', styles: { fontSize: 9 }, headStyles: { fillColor: [239, 68, 68] } });
+      doc.save(`Mortality_Report_${formatDate(fromDate)}.pdf`);
+      return;
+    }
+    
+    alert("PDF Export is not currently implemented for this specific report.");
   };
 
   const exportExcel = async () => {
@@ -460,10 +1023,74 @@ export default function WholesaleReports() {
       return;
     }
 
-    if (selectedCustomer === 'ALL') {
-      alert("Please select a specific retailer.");
+    if (reportType === 'outstanding_crates') {
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Outstanding Crates');
+      worksheet.getRow(1).values = ['#', 'Merchant Name', 'Contact', 'Route', 'Outstanding Crates'];
+      worksheet.getRow(1).font = { bold: true };
+      outstandingCratesData.list.forEach((m, idx) => {
+        worksheet.addRow([idx + 1, m.shopName, m.phone, m.route, m.outstandingCrates]);
+      });
+      worksheet.columns = [{ width: 5 }, { width: 30 }, { width: 15 }, { width: 15 }, { width: 20 }];
+      const buffer = await workbook.xlsx.writeBuffer();
+      saveAs(new Blob([buffer]), `Outstanding_Crates_${new Date().toISOString().split('T')[0]}.xlsx`);
       return;
     }
+
+    if (reportType === 'crate_aging') {
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Crate Aging');
+      worksheet.getRow(1).values = ['Merchant Name', 'Total Held', '7-15 Days', '16-30 Days', '>30 Days'];
+      worksheet.getRow(1).font = { bold: true };
+      crateAgingData.list.forEach((m) => {
+        worksheet.addRow([m.shopName, m.total, m.olderThan7 || 0, m.olderThan15 || 0, m.olderThan30 || 0]);
+      });
+      worksheet.addRow(['TOTAL', crateAgingData.totals.total, crateAgingData.totals.olderThan7, crateAgingData.totals.olderThan15, crateAgingData.totals.olderThan30]).font = { bold: true };
+      worksheet.columns = [{ width: 30 }, { width: 15 }, { width: 15 }, { width: 15 }, { width: 15 }];
+      const buffer = await workbook.xlsx.writeBuffer();
+      saveAs(new Blob([buffer]), `Crate_Aging_${new Date().toISOString().split('T')[0]}.xlsx`);
+      return;
+    }
+
+    if (reportType === 'truck_settlement') {
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Truck Settlement');
+      worksheet.getRow(1).values = ['Date', 'Truck Number', 'Driver Name', 'Expenses (Rs)', 'Mortality Kg', 'Carry-Over Kg', 'Cash Collected (Rs)'];
+      worksheet.getRow(1).font = { bold: true };
+      truckSettlementData.list.forEach((t) => {
+        worksheet.addRow([formatDate(t.date), t.truckNumber, t.driverName, t.expenses, t.mortalityKg || 0, t.carryOverKg || 0, t.cash]);
+      });
+      worksheet.columns = [{ width: 15 }, { width: 20 }, { width: 20 }, { width: 15 }, { width: 15 }, { width: 15 }, { width: 20 }];
+      const buffer = await workbook.xlsx.writeBuffer();
+      saveAs(new Blob([buffer]), `Truck_Settlement_${formatDate(fromDate)}.xlsx`);
+      return;
+    }
+
+    if (reportType === 'top_merchants') {
+      const workbook = new ExcelJS.Workbook();
+      
+      const wsTop = workbook.addWorksheet('Top Merchants');
+      wsTop.getRow(1).values = ['Rank', 'Merchant Name', 'Volume (Kg)', 'Revenue (Rs)'];
+      wsTop.getRow(1).font = { bold: true };
+      topMerchantsData.topMerchants.forEach((m, idx) => wsTop.addRow([idx + 1, m.shopName, m.volume, m.revenue]));
+      wsTop.columns = [{ width: 5 }, { width: 30 }, { width: 15 }, { width: 20 }];
+
+      const wsDef = workbook.addWorksheet('Critical Defaulters');
+      wsDef.getRow(1).values = ['Rank', 'Merchant Name', 'Last Payment', 'Outstanding (Rs)'];
+      wsDef.getRow(1).font = { bold: true };
+      topMerchantsData.defaulters.forEach((m, idx) => wsDef.addRow([idx + 1, m.shopName, m.lastPaymentDate ? formatDate(m.lastPaymentDate) : 'Never', m.balance]));
+      wsDef.columns = [{ width: 5 }, { width: 30 }, { width: 15 }, { width: 20 }];
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      saveAs(new Blob([buffer]), `Merchants_Report_${formatDate(fromDate)}.xlsx`);
+      return;
+    }
+
+    if (reportType === 'retailer_ledger') {
+      if (selectedCustomer === 'ALL') {
+        alert("Please select a specific retailer.");
+        return;
+      }
 
     const customer = customers.find(c => c.id === selectedCustomer);
     
@@ -590,12 +1217,72 @@ export default function WholesaleReports() {
       { width: 12 }, { width: 30 }, { width: 15 }
     ];
 
-    const buffer = await workbook.xlsx.writeBuffer();
-    saveAs(new Blob([buffer]), `Wholesale_Statement_${fromDate}.xlsx`);
+      const buffer = await workbook.xlsx.writeBuffer();
+      saveAs(new Blob([buffer]), `Wholesale_Statement_${fromDate}.xlsx`);
+      return;
+    }
+
+    if (reportType === 'revenue_category') {
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Revenue by Category');
+      worksheet.getRow(1).values = ['Category', 'Quantity Sold', 'Revenue (Rs)', '% Share'];
+      worksheet.getRow(1).font = { bold: true };
+      worksheet.addRow(['Live Chicken', revenueCategoryData.liveChicken.qty, revenueCategoryData.liveChicken.revenue, revenueCategoryData.liveChicken.percentage]);
+      worksheet.addRow(['Eggs', revenueCategoryData.eggs.qty, revenueCategoryData.eggs.revenue, revenueCategoryData.eggs.percentage]);
+      worksheet.addRow(['TOTAL', '-', revenueCategoryData.totalRevenue, '100']);
+      worksheet.columns = [{ width: 20 }, { width: 15 }, { width: 15 }, { width: 15 }];
+      const buffer = await workbook.xlsx.writeBuffer();
+      saveAs(new Blob([buffer]), `Revenue_Category_${formatDate(fromDate)}.xlsx`);
+      return;
+    }
+
+    if (reportType === 'yield') {
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Yield Report');
+      worksheet.getRow(1).values = ['Metric', 'Weight (Kg)'];
+      worksheet.getRow(1).font = { bold: true };
+      worksheet.addRow(['Total Procured (Inward)', yieldData.procuredKg]);
+      worksheet.addRow(['Total Sold (Outward)', yieldData.soldKg]);
+      worksheet.addRow(['Recorded Mortality', yieldData.mortalityKg]);
+      worksheet.addRow(['Unaccounted Shrinkage', yieldData.shrinkageKg]);
+      worksheet.addRow(['Estimated Yield %', yieldData.yieldPercentage]);
+      worksheet.columns = [{ width: 25 }, { width: 15 }];
+      const buffer = await workbook.xlsx.writeBuffer();
+      saveAs(new Blob([buffer]), `Yield_Report_${formatDate(fromDate)}.xlsx`);
+      return;
+    }
+
+    if (reportType === 'carry_over') {
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Carry Over');
+      worksheet.getRow(1).values = ['Date', 'Truck Number', 'Driver', 'Original Date', 'Carry-Over Kg'];
+      worksheet.getRow(1).font = { bold: true };
+      carryOverData.list.forEach(c => worksheet.addRow([formatDate(c.date), c.truckNumber, c.driverName, c.originalDate !== 'N/A' ? formatDate(c.originalDate) : 'N/A', c.carryOverKg]));
+      worksheet.addRow(['TOTAL', '', '', '', carryOverData.totalCarryOverKg]).font = { bold: true };
+      worksheet.columns = [{ width: 15 }, { width: 15 }, { width: 20 }, { width: 15 }, { width: 15 }];
+      const buffer = await workbook.xlsx.writeBuffer();
+      saveAs(new Blob([buffer]), `Carry_Over_${formatDate(fromDate)}.xlsx`);
+      return;
+    }
+
+    if (reportType === 'mortality') {
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Mortality Report');
+      worksheet.getRow(1).values = ['Date', 'Source', 'Details', 'Count', 'Weight (Kg)'];
+      worksheet.getRow(1).font = { bold: true };
+      mortalityData.list.forEach(m => worksheet.addRow([formatDate(m.date), m.source, m.details, m.count, m.weightKg]));
+      worksheet.addRow(['TOTAL', '', '', mortalityData.totalMortalityCount, mortalityData.totalMortalityKg]).font = { bold: true };
+      worksheet.columns = [{ width: 15 }, { width: 20 }, { width: 25 }, { width: 10 }, { width: 15 }];
+      const buffer = await workbook.xlsx.writeBuffer();
+      saveAs(new Blob([buffer]), `Mortality_Report_${formatDate(fromDate)}.xlsx`);
+      return;
+    }
+    
+    alert("Excel Export is not currently implemented for this specific report.");
   };
 
   const categories = [
-    { id: 'financials', label: 'Financials & Credit', icon: <DollarSign className="w-4 h-4" /> },
+    { id: 'financials', label: 'Financials & Credit', icon: <IndianRupee className="w-4 h-4" /> },
     { id: 'stock', label: 'Stock & Mortality', icon: <Package className="w-4 h-4" /> },
     { id: 'crates', label: 'Crate Circulation', icon: <Box className="w-4 h-4" /> },
     { id: 'logistics', label: 'Logistics', icon: <Truck className="w-4 h-4" /> }
@@ -606,20 +1293,20 @@ export default function WholesaleReports() {
       { id: 'retailer_ledger', label: 'Retailer Ledger (T-Account)' },
       { id: 'outstanding_dues', label: 'Outstanding Dues Ledger' },
       { id: 'cash_flow', label: 'Daily Cash Flow & Collections' },
-      { id: 'revenue_category', label: 'Revenue by Category', disabled: true }
+      { id: 'revenue_category', label: 'Revenue by Category' }
     ],
     stock: [
-      { id: 'yield', label: 'Procurement vs Dispatch (Yield)', disabled: true },
-      { id: 'carry_over', label: 'Carry-Over Analysis', disabled: true },
-      { id: 'mortality', label: 'Daily Mortality Report', disabled: true }
+      { id: 'yield', label: 'Procurement vs Dispatch (Yield)' },
+      { id: 'carry_over', label: 'Carry-Over Analysis' },
+      { id: 'mortality', label: 'Daily Mortality Report' }
     ],
     crates: [
-      { id: 'outstanding_crates', label: 'Outstanding Crates by Merchant', disabled: true },
-      { id: 'crate_aging', label: 'Crate Aging Report', disabled: true }
+      { id: 'outstanding_crates', label: 'Outstanding Crates by Merchant' },
+      { id: 'crate_aging', label: 'Crate Aging Report' }
     ],
     logistics: [
-      { id: 'truck_settlement', label: 'Truck Daily Settlement', disabled: true },
-      { id: 'top_merchants', label: 'Top Merchants / Defaulters', disabled: true }
+      { id: 'truck_settlement', label: 'Truck Daily Settlement' },
+      { id: 'top_merchants', label: 'Top Merchants / Defaulters' }
     ]
   };
 
@@ -638,7 +1325,7 @@ export default function WholesaleReports() {
                 }}
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
                   activeCategory === cat.id 
-                    ? 'bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-sm' 
+                    ? 'bg-emerald-500 text-white shadow-md' 
                     : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-700/50'
                 }`}
               >
@@ -703,13 +1390,13 @@ export default function WholesaleReports() {
             </div>
 
             <div className="flex gap-2 w-full md:w-auto mt-4 md:mt-0">
-              <button onClick={exportPDF} disabled={selectedCustomer === 'ALL'} className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-rose-50 text-rose-600 hover:bg-rose-100 dark:bg-rose-900/30 dark:text-rose-400 dark:hover:bg-rose-900/50 rounded-xl font-bold transition-colors cursor-pointer disabled:opacity-50">
+              <button onClick={exportPDF} disabled={reportType === 'retailer_ledger' && selectedCustomer === 'ALL'} className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-rose-50 text-rose-600 hover:bg-rose-100 dark:bg-rose-900/30 dark:text-rose-400 dark:hover:bg-rose-900/50 rounded-xl font-bold transition-colors cursor-pointer disabled:opacity-50">
                 <FileText className="w-4 h-4" /> PDF
               </button>
-              <button onClick={exportExcel} disabled={selectedCustomer === 'ALL'} className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-400 dark:hover:bg-emerald-900/50 rounded-xl font-bold transition-colors cursor-pointer disabled:opacity-50">
+              <button onClick={exportExcel} disabled={reportType === 'retailer_ledger' && selectedCustomer === 'ALL'} className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-400 dark:hover:bg-emerald-900/50 rounded-xl font-bold transition-colors cursor-pointer disabled:opacity-50">
                 <Download className="w-4 h-4" /> Excel
               </button>
-              <button onClick={() => window.print()} disabled={selectedCustomer === 'ALL'} className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 rounded-xl font-bold transition-colors cursor-pointer disabled:opacity-50">
+              <button onClick={() => window.print()} disabled={reportType === 'retailer_ledger' && selectedCustomer === 'ALL'} className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 rounded-xl font-bold transition-colors cursor-pointer disabled:opacity-50">
                 <Printer className="w-4 h-4" /> Print
               </button>
             </div>
@@ -958,8 +1645,508 @@ export default function WholesaleReports() {
             </div>
           </div>
         )}
-      </div>
 
+        {reportType === 'revenue_category' && revenueCategoryData && (
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden text-left animate-in fade-in">
+            <div className="p-6 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex justify-between items-center">
+              <div>
+                <h3 className="text-lg font-black text-slate-800 dark:text-white">Revenue by Category</h3>
+                <p className="text-sm text-slate-500 font-medium mt-1">
+                  Sales breakdown from {formatDate(fromDate)} to {formatDate(toDate)}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs uppercase font-bold text-slate-400">Total Revenue</p>
+                <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400">
+                  ₹{revenueCategoryData.totalRevenue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                
+                {/* Live Chicken Card */}
+                <div className="p-6 rounded-2xl border border-rose-100 dark:border-rose-900/30 bg-rose-50/50 dark:bg-rose-950/10 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className="w-10 h-10 rounded-full bg-rose-100 dark:bg-rose-900/50 flex items-center justify-center text-rose-600 dark:text-rose-400">
+                        <Package className="w-5 h-5" />
+                      </div>
+                      <h4 className="text-lg font-bold text-slate-800 dark:text-slate-200">Live Chicken</h4>
+                    </div>
+                    <div className="flex justify-between items-end mt-6">
+                      <div>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">Net Weight Sold</p>
+                        <p className="text-xl font-bold text-slate-700 dark:text-slate-300">{revenueCategoryData.liveChicken.qty.toLocaleString('en-IN', { maximumFractionDigits: 1 })} kg</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">Revenue</p>
+                        <p className="text-3xl font-black text-rose-600 dark:text-rose-400">₹{revenueCategoryData.liveChicken.revenue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-6 pt-4 border-t border-rose-200/50 dark:border-rose-800/30">
+                    <div className="flex justify-between items-center text-sm font-bold">
+                      <span className="text-slate-600 dark:text-slate-400">Share of Total Revenue</span>
+                      <span className="text-rose-600 dark:text-rose-400">{revenueCategoryData.liveChicken.percentage}%</span>
+                    </div>
+                    <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-2 mt-2">
+                      <div className="bg-rose-500 h-2 rounded-full" style={{ width: `${revenueCategoryData.liveChicken.percentage}%` }}></div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Eggs Card */}
+                <div className="p-6 rounded-2xl border border-amber-100 dark:border-amber-900/30 bg-amber-50/50 dark:bg-amber-950/10 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900/50 flex items-center justify-center text-amber-600 dark:text-amber-400">
+                        <Box className="w-5 h-5" />
+                      </div>
+                      <h4 className="text-lg font-bold text-slate-800 dark:text-slate-200">Eggs</h4>
+                    </div>
+                    <div className="flex justify-between items-end mt-6">
+                      <div>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">Quantity Sold</p>
+                        <p className="text-xl font-bold text-slate-700 dark:text-slate-300">{revenueCategoryData.eggs.qty.toLocaleString('en-IN', { maximumFractionDigits: 0 })} pcs</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">Revenue</p>
+                        <p className="text-3xl font-black text-amber-600 dark:text-amber-400">₹{revenueCategoryData.eggs.revenue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-6 pt-4 border-t border-amber-200/50 dark:border-amber-800/30">
+                    <div className="flex justify-between items-center text-sm font-bold">
+                      <span className="text-slate-600 dark:text-slate-400">Share of Total Revenue</span>
+                      <span className="text-amber-600 dark:text-amber-400">{revenueCategoryData.eggs.percentage}%</span>
+                    </div>
+                    <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-2 mt-2">
+                      <div className="bg-amber-500 h-2 rounded-full" style={{ width: `${revenueCategoryData.eggs.percentage}%` }}></div>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        )}
+
+        {reportType === 'yield' && yieldData && (
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden text-left animate-in fade-in">
+            <div className="p-6 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex justify-between items-center">
+              <div>
+                <h3 className="text-lg font-black text-slate-800 dark:text-white">Procurement vs Dispatch (Yield)</h3>
+                <p className="text-sm text-slate-500 font-medium mt-1">
+                  Overall stock efficiency from {formatDate(fromDate)} to {formatDate(toDate)}
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-y md:divide-y-0 divide-slate-100 dark:divide-slate-800 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+              <div className="p-6 text-center">
+                <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Procured (In)</p>
+                <p className="text-2xl font-black text-slate-700 dark:text-slate-200 mt-1">{yieldData.procuredKg.toLocaleString('en-IN', { maximumFractionDigits: 1 })} kg</p>
+              </div>
+              <div className="p-6 text-center">
+                <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Sold (Out)</p>
+                <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1">{yieldData.soldKg.toLocaleString('en-IN', { maximumFractionDigits: 1 })} kg</p>
+              </div>
+              <div className="p-6 text-center">
+                <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Mortality Loss</p>
+                <p className="text-2xl font-black text-red-600 dark:text-red-400 mt-1">{yieldData.mortalityKg.toLocaleString('en-IN', { maximumFractionDigits: 1 })} kg</p>
+              </div>
+              <div className="p-6 text-center">
+                <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Unaccounted Shrinkage</p>
+                <p className="text-2xl font-black text-orange-600 dark:text-orange-400 mt-1">{yieldData.shrinkageKg.toLocaleString('en-IN', { maximumFractionDigits: 1 })} kg</p>
+              </div>
+            </div>
+            
+            <div className="p-8 flex justify-center items-center">
+               <div className="text-center p-8 bg-emerald-50 dark:bg-emerald-950/20 rounded-2xl border border-emerald-100 dark:border-emerald-900/30">
+                  <p className="text-sm uppercase font-bold text-emerald-600 dark:text-emerald-500 mb-2 tracking-wider">Calculated Yield</p>
+                  <p className="text-5xl font-black text-emerald-700 dark:text-emerald-400">{yieldData.yieldPercentage}%</p>
+                  <p className="text-xs text-emerald-600/70 dark:text-emerald-500/70 mt-2 font-medium">Sold vs Procured Efficiency</p>
+               </div>
+            </div>
+          </div>
+        )}
+
+        {reportType === 'carry_over' && carryOverData && (
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden text-left animate-in fade-in">
+            <div className="p-6 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex justify-between items-center">
+              <div>
+                <h3 className="text-lg font-black text-slate-800 dark:text-white">Carry-Over Analysis</h3>
+                <p className="text-sm text-slate-500 font-medium mt-1">
+                  Unsold stock carrying over to the next day
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs uppercase font-bold text-slate-400">Total Carry-Over</p>
+                <p className="text-2xl font-black text-blue-600 dark:text-blue-400">
+                  {carryOverData.totalCarryOverKg.toLocaleString('en-IN', { maximumFractionDigits: 1 })} kg
+                </p>
+              </div>
+            </div>
+
+            <div className="p-0 overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-white dark:bg-slate-800/20 border-b border-slate-200 dark:border-slate-700/50 text-xs uppercase tracking-wider text-slate-500">
+                    <th className="p-4 font-bold">Date</th>
+                    <th className="p-4 font-bold">Truck No</th>
+                    <th className="p-4 font-bold">Driver</th>
+                    <th className="p-4 font-bold">Original Date</th>
+                    <th className="p-4 font-bold text-right">Locked Rate</th>
+                    <th className="p-4 font-bold text-right">Carry-Over Wt</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
+                  {carryOverData.list.map((c, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors">
+                      <td className="p-4 text-sm font-medium text-slate-500">{formatDate(c.date)}</td>
+                      <td className="p-4">
+                        <span className="font-bold font-mono text-slate-800 dark:text-slate-200">{c.truckNumber}</span>
+                      </td>
+                      <td className="p-4 text-sm text-slate-600 dark:text-slate-400">{c.driverName}</td>
+                      <td className="p-4 text-sm text-slate-500">{formatDate(c.originalDate)}</td>
+                      <td className="p-4 text-right font-medium text-emerald-600 dark:text-emerald-500">₹{c.lockedRate}/kg</td>
+                      <td className="p-4 text-right font-black text-blue-600 dark:text-blue-400">
+                        {c.carryOverKg.toLocaleString('en-IN', { maximumFractionDigits: 1 })} kg
+                      </td>
+                    </tr>
+                  ))}
+                  {carryOverData.list.length === 0 && (
+                    <tr>
+                      <td colSpan="6" className="p-8 text-center text-slate-500 font-medium">
+                        No carry-over stock recorded in this period.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {reportType === 'mortality' && mortalityData && (
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden text-left animate-in fade-in">
+            <div className="p-6 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex justify-between items-center">
+              <div>
+                <h3 className="text-lg font-black text-slate-800 dark:text-white">Daily Mortality Report</h3>
+                <p className="text-sm text-slate-500 font-medium mt-1">
+                  Dead birds tracked across Farm, Truck, and Shop Floor
+                </p>
+              </div>
+              <div className="text-right flex gap-6">
+                <div>
+                  <p className="text-[10px] uppercase font-bold text-slate-400">Total Count</p>
+                  <p className="text-xl font-black text-red-500">{mortalityData.totalMortalityCount} birds</p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase font-bold text-slate-400">Total Weight</p>
+                  <p className="text-2xl font-black text-red-600 dark:text-red-400">
+                    {mortalityData.totalMortalityKg.toLocaleString('en-IN', { maximumFractionDigits: 1 })} kg
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-0 overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-white dark:bg-slate-800/20 border-b border-slate-200 dark:border-slate-700/50 text-xs uppercase tracking-wider text-slate-500">
+                    <th className="p-4 font-bold">Date</th>
+                    <th className="p-4 font-bold">Source</th>
+                    <th className="p-4 font-bold">Details</th>
+                    <th className="p-4 font-bold text-right">Dead Count</th>
+                    <th className="p-4 font-bold text-right">Dead Weight</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
+                  {mortalityData.list.map((m, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors">
+                      <td className="p-4 text-sm font-medium text-slate-500">{formatDate(m.date)}</td>
+                      <td className="p-4">
+                        <span className="inline-flex px-2 py-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded text-xs font-bold">
+                          {m.source}
+                        </span>
+                      </td>
+                      <td className="p-4 text-sm text-slate-600 dark:text-slate-400">{m.details}</td>
+                      <td className="p-4 text-right font-bold text-slate-700 dark:text-slate-300">
+                        {m.count}
+                      </td>
+                      <td className="p-4 text-right font-black text-red-600 dark:text-red-400">
+                        {m.weightKg.toLocaleString('en-IN', { maximumFractionDigits: 1 })} kg
+                      </td>
+                    </tr>
+                  ))}
+                  {mortalityData.list.length === 0 && (
+                    <tr>
+                      <td colSpan="5" className="p-8 text-center text-slate-500 font-medium">
+                        Great news! No mortality recorded in this period.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+        {reportType === 'outstanding_crates' && outstandingCratesData && (
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden text-left animate-in fade-in">
+            <div className="p-6 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex justify-between items-center">
+              <div>
+                <h3 className="text-lg font-black text-slate-800 dark:text-white">Outstanding Crates by Merchant</h3>
+                <p className="text-sm text-slate-500 font-medium mt-1">
+                  Active crate balances currently held by merchants
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs uppercase font-bold text-slate-400">Total Outstanding</p>
+                <p className="text-2xl font-black text-rose-600 dark:text-rose-400">
+                  {outstandingCratesData.totalOutstanding} crates
+                </p>
+              </div>
+            </div>
+
+            <div className="p-0 overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-white dark:bg-slate-800/20 border-b border-slate-200 dark:border-slate-700/50 text-xs uppercase tracking-wider text-slate-500">
+                    <th className="p-4 font-bold">#</th>
+                    <th className="p-4 font-bold">Merchant Name</th>
+                    <th className="p-4 font-bold">Contact</th>
+                    <th className="p-4 font-bold">Route</th>
+                    <th className="p-4 font-bold text-right">Outstanding Crates</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
+                  {outstandingCratesData.list.map((m, idx) => (
+                    <tr key={m.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors">
+                      <td className="p-4 text-sm font-medium text-slate-500">{idx + 1}</td>
+                      <td className="p-4 font-bold text-slate-800 dark:text-slate-200">{m.shopName}</td>
+                      <td className="p-4 text-sm text-slate-600 dark:text-slate-400">{m.phone}</td>
+                      <td className="p-4 text-sm text-slate-600 dark:text-slate-400">{m.route}</td>
+                      <td className="p-4 text-right">
+                        <span className="inline-flex items-center justify-center px-3 py-1 bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 font-black rounded-lg border border-amber-100 dark:border-amber-900/50">
+                          {m.outstandingCrates}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  {outstandingCratesData.list.length === 0 && (
+                    <tr>
+                      <td colSpan="5" className="p-8 text-center text-slate-500 font-medium">
+                        No outstanding crates currently logged.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {reportType === 'crate_aging' && crateAgingData && (
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden text-left animate-in fade-in">
+            <div className="p-6 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex justify-between items-center">
+              <div>
+                <h3 className="text-lg font-black text-slate-800 dark:text-white">Crate Aging Report</h3>
+                <p className="text-sm text-slate-500 font-medium mt-1">
+                  Estimated duration merchants have held onto crates (FIFO)
+                </p>
+              </div>
+            </div>
+
+            <div className="p-0 overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-white dark:bg-slate-800/20 border-b border-slate-200 dark:border-slate-700/50 text-xs uppercase tracking-wider text-slate-500">
+                    <th className="p-4 font-bold">Merchant Name</th>
+                    <th className="p-4 font-bold text-center">Total Held</th>
+                    <th className="p-4 font-bold text-center text-amber-600 dark:text-amber-500">7-15 Days Old</th>
+                    <th className="p-4 font-bold text-center text-orange-600 dark:text-orange-500">16-30 Days Old</th>
+                    <th className="p-4 font-bold text-center text-rose-600 dark:text-rose-500">&gt;30 Days Old</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
+                  {crateAgingData.list.map((m) => (
+                    <tr key={m.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors">
+                      <td className="p-4 font-bold text-slate-800 dark:text-slate-200">{m.shopName}</td>
+                      <td className="p-4 text-center font-black text-slate-700 dark:text-slate-300">{m.total}</td>
+                      <td className="p-4 text-center font-bold text-amber-600 dark:text-amber-500">{m.olderThan7 > 0 ? m.olderThan7 : '-'}</td>
+                      <td className="p-4 text-center font-bold text-orange-600 dark:text-orange-500">{m.olderThan15 > 0 ? m.olderThan15 : '-'}</td>
+                      <td className="p-4 text-center font-bold text-rose-600 dark:text-rose-500">{m.olderThan30 > 0 ? m.olderThan30 : '-'}</td>
+                    </tr>
+                  ))}
+                  <tr className="bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-700 font-black">
+                    <td className="p-4 text-slate-800 dark:text-slate-200">TOTAL</td>
+                    <td className="p-4 text-center text-slate-800 dark:text-slate-200">{crateAgingData.totals.total}</td>
+                    <td className="p-4 text-center text-amber-600 dark:text-amber-500">{crateAgingData.totals.olderThan7}</td>
+                    <td className="p-4 text-center text-orange-600 dark:text-orange-500">{crateAgingData.totals.olderThan15}</td>
+                    <td className="p-4 text-center text-rose-600 dark:text-rose-500">{crateAgingData.totals.olderThan30}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {reportType === 'truck_settlement' && truckSettlementData && (
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden text-left animate-in fade-in">
+            <div className="p-6 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex justify-between items-center">
+              <div>
+                <h3 className="text-lg font-black text-slate-800 dark:text-white">Truck Daily Settlement</h3>
+                <p className="text-sm text-slate-500 font-medium mt-1">
+                  Cash collections, expenses, and left-overs for the selected period
+                </p>
+              </div>
+              <div className="text-right flex gap-6">
+                 <div>
+                  <p className="text-[10px] uppercase font-bold text-slate-400">Total Expenses</p>
+                  <p className="text-xl font-black text-rose-500">₹{truckSettlementData.totalExpenses.toLocaleString('en-IN')}</p>
+                 </div>
+                 <div>
+                  <p className="text-[10px] uppercase font-bold text-slate-400">Total Cash Collected</p>
+                  <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400">
+                    ₹{truckSettlementData.totalRevenue.toLocaleString('en-IN')}
+                  </p>
+                 </div>
+              </div>
+            </div>
+
+            <div className="p-0 overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-white dark:bg-slate-800/20 border-b border-slate-200 dark:border-slate-700/50 text-xs uppercase tracking-wider text-slate-500">
+                    <th className="p-4 font-bold">Date</th>
+                    <th className="p-4 font-bold">Truck / Driver</th>
+                    <th className="p-4 font-bold text-right text-rose-600 dark:text-rose-400">Expenses</th>
+                    <th className="p-4 font-bold text-right text-red-500">Mortality Kg</th>
+                    <th className="p-4 font-bold text-right text-blue-500">Carry-Over Kg</th>
+                    <th className="p-4 font-bold text-right text-emerald-600 dark:text-emerald-400">Cash Collected</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
+                  {truckSettlementData.list.map((t) => (
+                    <tr key={t.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors">
+                      <td className="p-4 text-sm font-medium text-slate-500">{formatDate(t.date)}</td>
+                      <td className="p-4">
+                        <span className="font-bold text-slate-800 dark:text-slate-200 block">{t.truckNumber}</span>
+                        <span className="text-xs text-slate-500">{t.driverName}</span>
+                      </td>
+                      <td className="p-4 text-right font-bold text-rose-600 dark:text-rose-400">₹{t.expenses.toLocaleString('en-IN')}</td>
+                      <td className="p-4 text-right font-medium text-red-500">{t.mortalityKg > 0 ? t.mortalityKg : '-'}</td>
+                      <td className="p-4 text-right font-medium text-blue-500">{t.carryOverKg > 0 ? t.carryOverKg : '-'}</td>
+                      <td className="p-4 text-right font-black text-emerald-600 dark:text-emerald-400">₹{t.cash.toLocaleString('en-IN')}</td>
+                    </tr>
+                  ))}
+                  {truckSettlementData.list.length === 0 && (
+                    <tr>
+                      <td colSpan="6" className="p-8 text-center text-slate-500 font-medium">
+                        No truck dispatches/settlements logged.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {reportType === 'top_merchants' && topMerchantsData && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in">
+            {/* Top Merchants */}
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden text-left">
+              <div className="p-6 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900">
+                <h3 className="text-lg font-black text-slate-800 dark:text-white">Top 10 Merchants</h3>
+                <p className="text-sm text-slate-500 font-medium mt-1">
+                  Ranked by Revenue in Period
+                </p>
+              </div>
+              <div className="p-0">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="border-b border-slate-200 dark:border-slate-800 text-xs uppercase text-slate-500">
+                      <th className="p-4 font-bold">Merchant</th>
+                      <th className="p-4 font-bold text-right">Volume</th>
+                      <th className="p-4 font-bold text-right">Revenue</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {topMerchantsData.topMerchants.map((m, idx) => (
+                      <tr key={m.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors">
+                        <td className="p-4 flex items-center gap-3">
+                          <span className="w-6 h-6 flex items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800 text-xs font-bold text-slate-500">
+                            {idx + 1}
+                          </span>
+                          <span className="font-bold text-slate-800 dark:text-slate-200">{m.shopName}</span>
+                        </td>
+                        <td className="p-4 text-right text-slate-600 dark:text-slate-400 font-medium">
+                          {m.volume.toLocaleString('en-IN', { maximumFractionDigits: 1 })} kg
+                        </td>
+                        <td className="p-4 text-right font-black text-emerald-600 dark:text-emerald-400">
+                          ₹{m.revenue.toLocaleString('en-IN')}
+                        </td>
+                      </tr>
+                    ))}
+                    {topMerchantsData.topMerchants.length === 0 && (
+                       <tr><td colSpan="3" className="p-8 text-center text-slate-500 font-medium">No sales found in this period.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Top Defaulters */}
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-rose-200 dark:border-rose-900/30 shadow-sm overflow-hidden text-left">
+              <div className="p-6 border-b border-rose-100 dark:border-rose-900/30 bg-rose-50/30 dark:bg-rose-950/20">
+                <h3 className="text-lg font-black text-rose-800 dark:text-rose-400">Critical Defaulters</h3>
+                <p className="text-sm text-slate-500 font-medium mt-1">
+                  Ranked by Last Payment Date & Balance
+                </p>
+              </div>
+              <div className="p-0">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="border-b border-slate-200 dark:border-slate-800 text-xs uppercase text-slate-500">
+                      <th className="p-4 font-bold">Merchant</th>
+                      <th className="p-4 font-bold text-center">Last Payment</th>
+                      <th className="p-4 font-bold text-right">Outstanding</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {topMerchantsData.defaulters.map((m, idx) => (
+                      <tr key={m.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors">
+                        <td className="p-4 flex items-center gap-3">
+                          <span className="w-6 h-6 flex items-center justify-center rounded-full bg-rose-100 dark:bg-rose-900/50 text-xs font-bold text-rose-600 dark:text-rose-400">
+                            {idx + 1}
+                          </span>
+                          <span className="font-bold text-slate-800 dark:text-slate-200">{m.shopName}</span>
+                        </td>
+                        <td className="p-4 text-center">
+                          <span className={`inline-flex px-2 py-1 rounded text-xs font-bold ${m.daysSincePayment > 30 ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-400' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'}`}>
+                            {m.lastPaymentDate ? formatDate(m.lastPaymentDate) : 'Never Paid'}
+                          </span>
+                        </td>
+                        <td className="p-4 text-right font-black text-rose-600 dark:text-rose-400">
+                          ₹{m.balance.toLocaleString('en-IN')}
+                        </td>
+                      </tr>
+                    ))}
+                    {topMerchantsData.defaulters.length === 0 && (
+                       <tr><td colSpan="3" className="p-8 text-center text-slate-500 font-medium">No outstanding balances found!</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+      </div>
     </div>
   );
 }

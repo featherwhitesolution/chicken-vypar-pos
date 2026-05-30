@@ -17,6 +17,7 @@ export default function FarmInward() {
     grossWeight: '',
     tareWeight: '',
     birdsReceived: '',
+    deadBirdsWeight: '',
     rate: '',
     notes: ''
   });
@@ -38,10 +39,12 @@ export default function FarmInward() {
   const gross = parseFloat(formData.grossWeight) || 0;
   const tare = parseFloat(formData.tareWeight) || 0;
   const receivedCount = parseInt(formData.birdsReceived) || 0;
+  const deadWeight = parseFloat(formData.deadBirdsWeight) || 0;
   const rateVal = parseFloat(formData.rate) || 0;
 
   // Calculators
   const netReceivedWeight = Math.max(0, gross - tare);
+  const sellableWeight = Math.max(0, netReceivedWeight - deadWeight);
   const transitWeightLoss = Math.max(0, farmWeight - netReceivedWeight);
   const transitWeightLossPercent = farmWeight > 0 ? ((transitWeightLoss / farmWeight) * 100).toFixed(2) : '0.00';
   const transitMortality = Math.max(0, loadedCount - receivedCount);
@@ -65,7 +68,9 @@ export default function FarmInward() {
         grossWeight: gross,
         tareWeight: tare,
         netWeight: netReceivedWeight,
+        sellableWeight: sellableWeight,
         birdsReceived: receivedCount,
+        deadBirdsWeight: deadWeight,
         transitWeightLoss: transitWeightLoss,
         transitWeightLossPercent: parseFloat(transitWeightLossPercent),
         transitMortality: transitMortality,
@@ -89,6 +94,7 @@ export default function FarmInward() {
           grossWeight: '',
           tareWeight: '',
           birdsReceived: '',
+          deadBirdsWeight: '',
           rate: '',
           notes: ''
         });
@@ -120,7 +126,7 @@ export default function FarmInward() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
+
         {/* Farm Inward Entry Form */}
         <div className="lg:col-span-2 glass-panel p-6 md:p-8 rounded-2xl bg-white dark:bg-slate-900/50 relative overflow-hidden text-left h-fit">
           {showSuccess && (
@@ -137,7 +143,7 @@ export default function FarmInward() {
           </h3>
 
           <form onSubmit={handleSubmit} className="space-y-6">
-            
+
             {/* Section 1: Logistics & Source */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="space-y-1">
@@ -208,9 +214,9 @@ export default function FarmInward() {
             </div>
 
             {/* Section 3: Warehouse Weighbridge & Offloading */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 pt-2">
               <div className="space-y-1">
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Gross Weight (Loaded, kg)</label>
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Gross Wt (kg)</label>
                 <input
                   type="number"
                   step="0.01"
@@ -218,12 +224,12 @@ export default function FarmInward() {
                   value={formData.grossWeight}
                   onChange={e => setFormData({ ...formData, grossWeight: e.target.value })}
                   className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-sm font-bold text-slate-800 dark:text-white"
-                  placeholder="Vehicle + birds"
+                  placeholder="Loaded"
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Tare Weight (Empty, kg)</label>
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Tare Wt (kg)</label>
                 <input
                   type="number"
                   step="0.01"
@@ -231,18 +237,30 @@ export default function FarmInward() {
                   value={formData.tareWeight}
                   onChange={e => setFormData({ ...formData, tareWeight: e.target.value })}
                   className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-sm font-bold text-slate-800 dark:text-white"
-                  placeholder="Empty vehicle weight"
+                  placeholder="Empty"
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Live Birds Received</label>
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Live Birds</label>
                 <input
                   type="number"
                   value={formData.birdsReceived}
                   onChange={e => setFormData({ ...formData, birdsReceived: e.target.value })}
                   className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-sm font-semibold"
-                  placeholder="Live count"
+                  placeholder="Count"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500">DOA Wt (kg)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={formData.deadBirdsWeight}
+                  onChange={e => setFormData({ ...formData, deadBirdsWeight: e.target.value })}
+                  className="w-full p-2.5 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl outline-none focus:ring-2 focus:ring-rose-500 text-sm font-semibold text-rose-600 dark:text-rose-400"
+                  placeholder="Dead birds wt"
                 />
               </div>
             </div>
@@ -290,11 +308,11 @@ export default function FarmInward() {
 
         {/* Right Column: Live Tally & History */}
         <div className="space-y-6">
-          
+
           {/* Live Inward Tally Card */}
           <div className="glass-panel p-6 rounded-2xl bg-gradient-to-b from-[#064e3b] to-[#022c22] text-white border-transparent text-left relative overflow-hidden shadow-lg">
             <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
-            
+
             <h4 className="text-[10px] font-black uppercase text-emerald-350 tracking-widest flex items-center gap-1 mb-4">
               <Scale className="w-4 h-4 text-emerald-350" /> Weighbridge Live Calculations
             </h4>
@@ -304,7 +322,7 @@ export default function FarmInward() {
                 <span className="text-emerald-200">Net Received Weight</span>
                 <span className="font-bold text-white text-base">{netReceivedWeight.toFixed(2)} kg</span>
               </div>
-              
+
               <div className="flex justify-between items-center text-sm border-b border-white/5 pb-2">
                 <span className="text-emerald-200">Transit Weight Loss</span>
                 <span className="font-bold text-amber-300 flex items-center gap-1">
@@ -313,9 +331,16 @@ export default function FarmInward() {
               </div>
 
               <div className="flex justify-between items-center text-sm border-b border-white/5 pb-2">
-                <span className="text-emerald-200">Transit Mortality (Loss)</span>
-                <span className={`font-bold flex items-center gap-1 ${transitMortality > 0 ? 'text-red-350 font-extrabold' : 'text-emerald-100'}`}>
-                  {transitMortality > 0 ? `${transitMortality} Dead Birds` : '0 Birds'}
+                <span className="text-emerald-200">Sellable Weight</span>
+                <span className="font-bold text-emerald-300 flex items-center gap-1">
+                  {sellableWeight.toFixed(2)} kg
+                </span>
+              </div>
+
+              <div className="flex justify-between items-center text-sm border-b border-white/5 pb-2">
+                <span className="text-emerald-200">Transit Mortality (DOA)</span>
+                <span className={`font-bold flex items-center gap-1 ${transitMortality > 0 || deadWeight > 0 ? 'text-red-350 font-extrabold' : 'text-emerald-100'}`}>
+                  {transitMortality > 0 ? `${transitMortality} Dead` : '0 Dead'} {deadWeight > 0 ? `| ${deadWeight.toFixed(2)} kg` : ''}
                 </span>
               </div>
 
@@ -331,7 +356,7 @@ export default function FarmInward() {
                 </span>
               </div>
             </div>
-            
+
             {transitWeightLossPercent > 4.0 && (
               <div className="mt-4 flex items-start gap-2 p-2 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[10px] text-amber-300 animate-pulse">
                 <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
@@ -346,7 +371,7 @@ export default function FarmInward() {
               <History className="w-5 h-5 text-emerald-500" />
               Recent Farm Imports
             </h3>
-            
+
             <div className="space-y-4 overflow-y-auto pr-2 custom-scrollbar flex-1">
               {inwards.length > 0 ? (
                 inwards.map((item) => (
