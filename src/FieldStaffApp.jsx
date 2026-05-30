@@ -63,7 +63,32 @@ export default function FieldStaffApp({ user, onLogout }) {
   const [gpsLoading, setGpsLoading] = useState(false);
   const [gpsAccuracy, setGpsAccuracy] = useState(null);
 
+  // Real connectivity state — navigator.onLine is unreliable on mobile
+  // We do an actual fetch ping instead
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  const checkRealConnectivity = async () => {
+    // First fast check: if browser says offline, trust it immediately
+    if (!navigator.onLine) {
+      setIsOnline(false);
+      return;
+    }
+    // Otherwise, do a real network request to confirm actual internet access
+    try {
+      await fetch(`https://www.googleapis.com/generate_204?_=${Date.now()}`, {
+        method: 'GET',
+        cache: 'no-store',
+        mode: 'no-cors',
+        signal: AbortSignal.timeout(5000) // 5s timeout
+      });
+      setIsOnline(true);
+    } catch {
+      setIsOnline(false);
+    }
+  };
+
   const trackingIntervalRef = useRef(null);
+  const connectivityIntervalRef = useRef(null);
 
   // 1. Fetch real-time staff document for sync (routeHistory, status)
   useEffect(() => {
@@ -74,6 +99,23 @@ export default function FieldStaffApp({ user, onLogout }) {
     });
     return () => unsub();
   }, [user.docId]);
+
+  // 1b. Real connectivity monitor — checks every 15s and on network events
+  useEffect(() => {
+    checkRealConnectivity(); // initial check
+    connectivityIntervalRef.current = setInterval(checkRealConnectivity, 15000);
+
+    const handleOnline = () => checkRealConnectivity(); // verify before marking online
+    const handleOffline = () => setIsOnline(false);     // trust offline immediately
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      clearInterval(connectivityIntervalRef.current);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   // 2. Fetch real-time wholesaler customers
   useEffect(() => {
@@ -198,7 +240,7 @@ export default function FieldStaffApp({ user, onLogout }) {
     }
 
     // 6c. Get Network status
-    const networkStatus = navigator.onLine ? 'online' : 'offline';
+    const networkStatus = isOnline ? 'online' : 'offline';
     const timestamp = new Date().toISOString();
 
     // 6d. Update Firestore Staff telemetry
@@ -297,7 +339,7 @@ export default function FieldStaffApp({ user, onLogout }) {
     }
 
     const timestamp = new Date().toISOString();
-    const networkStatus = navigator.onLine ? 'online' : 'offline';
+    const networkStatus = isOnline ? 'online' : 'offline';
 
     try {
       const staffRef = doc(db, 'field_staff', user.docId);
@@ -345,7 +387,7 @@ export default function FieldStaffApp({ user, onLogout }) {
     let batteryCharging = staffData?.batteryCharging || false;
 
     const timestamp = new Date().toISOString();
-    const networkStatus = navigator.onLine ? 'online' : 'offline';
+    const networkStatus = isOnline ? 'online' : 'offline';
 
     try {
       const staffRef = doc(db, 'field_staff', user.docId);
@@ -407,7 +449,7 @@ export default function FieldStaffApp({ user, onLogout }) {
 
     const timestamp = new Date().toISOString();
     const batteryPercentage = staffData?.batteryPercentage || 100;
-    const networkStatus = navigator.onLine ? 'online' : 'offline';
+    const networkStatus = isOnline ? 'online' : 'offline';
 
     try {
       const staffRef = doc(db, 'field_staff', user.docId);
@@ -464,7 +506,7 @@ export default function FieldStaffApp({ user, onLogout }) {
 
     const timestamp = new Date().toISOString();
     const batteryPercentage = staffData?.batteryPercentage || 100;
-    const networkStatus = navigator.onLine ? 'online' : 'offline';
+    const networkStatus = isOnline ? 'online' : 'offline';
 
     try {
       const staffRef = doc(db, 'field_staff', user.docId);
@@ -551,7 +593,7 @@ export default function FieldStaffApp({ user, onLogout }) {
             lng,
             timestamp,
             battery: staffData?.batteryPercentage || 100,
-            network: navigator.onLine ? 'online' : 'offline',
+            network: isOnline ? 'online' : 'offline',
             action: `Collected Cash ₹${amount.toLocaleString('en-IN')} at ${checkedInShop.shopName}`
           }
         ]
@@ -625,13 +667,13 @@ export default function FieldStaffApp({ user, onLogout }) {
         <div className="flex items-center gap-3">
           {/* Geolocation status indicator */}
           <div className="flex items-center gap-1.5 bg-[#f2f2f7] px-3 py-1 rounded-full border border-gray-200 shadow-inner">
-            {navigator.onLine ? (
+            {isOnline ? (
               <Wifi className="w-3.5 h-3.5 text-[#34c759]" />
             ) : (
               <WifiOff className="w-3.5 h-3.5 text-[#ff3b30] animate-pulse" />
             )}
-            <span className={`text-[10px] font-bold uppercase tracking-wide ${navigator.onLine ? 'text-[#34c759]' : 'text-[#ff3b30]'}`}>
-              {navigator.onLine ? 'Online' : 'Offline'}
+            <span className={`text-[10px] font-bold uppercase tracking-wide ${isOnline ? 'text-[#34c759]' : 'text-[#ff3b30]'}`}>
+              {isOnline ? 'Online' : 'Offline'}
             </span>
           </div>
 
@@ -743,7 +785,7 @@ export default function FieldStaffApp({ user, onLogout }) {
                       
                       const mockAction = `Simulated GPS Jump to ${shop.shopName}`;
                       const batteryPercentage = staffData?.batteryPercentage || 98;
-                      const networkStatus = navigator.onLine ? 'online' : 'offline';
+                      const networkStatus = isOnline ? 'online' : 'offline';
 
                       await updateDoc(staffRef, {
                         lastLocation: { lat: shop.location.lat, lng: shop.location.lng, timestamp },
