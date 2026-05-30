@@ -798,6 +798,9 @@ export default function WholesaleReports() {
     const doc = new jsPDF('landscape');
     const customer = customers.find(c => c.id === selectedCustomer);
     const customerName = customer ? customer.shopName : 'Unknown';
+    const proprietor = customer ? customer.proprietorName || 'N/A' : 'N/A';
+    const uniqueId = customer ? customer.uniqueId || 'Legacy' : 'N/A';
+    const joinedDate = customer?.createdAt ? new Date(customer.createdAt).toLocaleDateString('en-GB') : 'Unknown';
     
     // Header
     doc.setFontSize(18); doc.text(activeShop.shopName, 14, 20);
@@ -806,8 +809,10 @@ export default function WholesaleReports() {
     doc.text(`GSTIN: ${activeShop.gstin}`, 14, 35);
     
     doc.setFontSize(14); doc.setTextColor(40);
-    doc.text(`Retailer Statement of Account: ${customerName}`, 14, 45);
-    doc.setFontSize(10); doc.setTextColor(100); doc.text(`Period: ${formatDate(fromDate)} to ${formatDate(toDate)}`, 14, 51);
+    doc.text(`Retailer Statement of Account`, 14, 45);
+    doc.setFontSize(10); doc.setTextColor(100);
+    doc.text(`Retailer: ${customerName} | Owner: ${proprietor}`, 14, 51);
+    doc.text(`Customer ID: ${uniqueId} | Boarding Date: ${joinedDate} | Period: ${formatDate(fromDate)} to ${formatDate(toDate)}`, 14, 56);
 
     // Left Table: Supplies (Debit)
     const leftCol = ["Date", "Supply Details", "Qty/Weight", "Rate", "Amount (Dr)"];
@@ -827,7 +832,7 @@ export default function WholesaleReports() {
     autoTable(doc, { 
       head: [leftCol], 
       body: leftRows, 
-      startY: 57, 
+      startY: 61, 
       margin: { left: 14 }, 
       tableWidth: 130, 
       theme: 'grid', 
@@ -839,7 +844,7 @@ export default function WholesaleReports() {
     autoTable(doc, { 
       head: [rightCol], 
       body: rightRows, 
-      startY: 57, 
+      startY: 61, 
       margin: { left: 150 }, 
       tableWidth: 130, 
       theme: 'grid', 
@@ -1419,9 +1424,19 @@ export default function WholesaleReports() {
             <div className="p-6 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex justify-between items-center">
               <div>
                 <h3 className="text-lg font-black text-slate-800 dark:text-white">Retailer Statement of Account</h3>
-                <p className="text-sm text-slate-500 font-medium mt-1">
-                  {customers.find(c => c.id === selectedCustomer)?.shopName} | Period: {formatDate(fromDate)} to {formatDate(toDate)}
-                </p>
+                {(() => {
+                  const customer = customers.find(c => c.id === selectedCustomer);
+                  return (
+                    <>
+                      <p className="text-sm text-slate-700 dark:text-slate-200 font-bold mt-2">
+                        {customer?.shopName} {customer?.proprietorName ? `(Owner: ${customer.proprietorName})` : ''}
+                      </p>
+                      <p className="text-xs text-slate-500 font-medium mt-1">
+                        ID: <span className="font-mono bg-slate-100 dark:bg-slate-800 px-1 rounded">{customer?.uniqueId || 'Legacy'}</span> | Boarded: {customer?.createdAt ? new Date(customer.createdAt).toLocaleDateString('en-GB') : 'Unknown'} | Period: {formatDate(fromDate)} to {formatDate(toDate)}
+                      </p>
+                    </>
+                  );
+                })()}
               </div>
               <div className="text-right">
                 <p className="text-xs uppercase font-bold text-slate-400">Closing Balance</p>

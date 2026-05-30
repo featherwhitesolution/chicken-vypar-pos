@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, Save, CheckCircle2, UserPlus, MapPin, Compass, Phone, Loader2, Navigation, Trash2, Map, List, ChevronDown, X } from 'lucide-react';
 import { db } from './firebase';
-import { collection, addDoc, onSnapshot, query, orderBy, deleteDoc, doc } from 'firebase/firestore';
+import { collection, addDoc, onSnapshot, query, orderBy, deleteDoc, doc, runTransaction } from 'firebase/firestore';
 
 // Each area: { name, type }
 // Types: 'Residential', 'Commercial', 'Market', 'Industrial', 'Mixed'
@@ -382,20 +382,39 @@ export default function WholesaleCustomers() {
     }
     setIsSaving(true);
     try {
-      const payload = {
-        shopName: formData.shopName.trim(),
-        proprietorName: formData.proprietorName.trim(),
-        phone: formData.phone.trim(),
-        state: formData.state,
-        city: formData.city,
-        area: formData.area,
-        // keep 'route' field for backward compatibility
-        route: formData.area,
-        rateOffset: parseFloat(formData.rateOffset) || 0,
-        location: formData.location,
-        createdAt: new Date().toISOString()
-      };
-      await addDoc(collection(db, 'wholesale_customers'), payload);
+      await runTransaction(db, async (transaction) => {
+        // Reference to the global counter
+        const counterRef = doc(db, 'counters', 'wholesale_customer_id');
+        const counterDoc = await transaction.get(counterRef);
+        
+        let nextVal = 1000; // Starting value if no counter exists
+        if (counterDoc.exists() && counterDoc.data().currentValue) {
+          nextVal = counterDoc.data().currentValue + 1;
+        }
+        
+        // Update the counter
+        transaction.set(counterRef, { currentValue: nextVal }, { merge: true });
+
+        // Prepare the new customer document
+        const newCustomerRef = doc(collection(db, 'wholesale_customers'));
+        const payload = {
+          shopName: formData.shopName.trim(),
+          proprietorName: formData.proprietorName.trim(),
+          phone: formData.phone.trim(),
+          state: formData.state,
+          city: formData.city,
+          area: formData.area,
+          route: formData.area,
+          rateOffset: parseFloat(formData.rateOffset) || 0,
+          location: formData.location,
+          createdAt: new Date().toISOString(),
+          uniqueId: `CV-${nextVal}`
+        };
+        
+        // Save the customer
+        transaction.set(newCustomerRef, payload);
+      });
+
       setShowSuccess(true);
       setTimeout(() => {
         setShowSuccess(false);
@@ -644,6 +663,10 @@ export default function WholesaleCustomers() {
                           <td className="p-4 text-left">
                             <span className="block font-bold text-slate-800 dark:text-white text-base leading-tight">{customer.shopName}</span>
                             <span className="block text-xs text-slate-400 mt-1">Proprietor: {customer.proprietorName || 'N/A'}</span>
+                            <div className="flex gap-2 mt-1">
+                              <span className="text-[10px] font-mono text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">{customer.uniqueId || 'Legacy ID'}</span>
+                              <span className="text-[10px] text-slate-400">Joined: {new Date(customer.createdAt).toLocaleDateString('en-GB')}</span>
+                            </div>
                           </td>
                           <td className="p-4 text-left">
                             <span className="block font-medium text-xs flex items-center gap-1">

@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
-import { Store, Tractor, Building2, User, Lock, ArrowRight, Shield } from 'lucide-react';
+import { Store, Tractor, Building2, User, Lock, ArrowRight, Shield, Smartphone } from 'lucide-react';
+import { db } from './firebase';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 
 export default function Login({ onLogin }) {
   const [role, setRole] = useState('Retailer');
@@ -9,6 +11,7 @@ export default function Login({ onLogin }) {
   const [otpSent, setOtpSent] = useState(false);
   const [otpValue, setOtpValue] = useState('');
   const [isSendingOtp, setIsSendingOtp] = useState(false);
+  const [isVerifyingStaff, setIsVerifyingStaff] = useState(false);
   
   const handleLogin = (e) => {
     e.preventDefault();
@@ -16,6 +19,47 @@ export default function Login({ onLogin }) {
 
     if (normalizedUser === 'admin_farhan' && password === 'Farhans@27') {
       onLogin({ username: normalizedUser, role: 'developer_admin' });
+      return;
+    }
+
+    if (role === 'Staff') {
+      setIsVerifyingStaff(true);
+      const q = query(
+        collection(db, 'field_staff'),
+        where('phone', '==', normalizedUser),
+        where('status', '==', 'Active')
+      );
+      getDocs(q).then((snapshot) => {
+        setIsVerifyingStaff(false);
+        if (snapshot.empty) {
+          alert("Invalid Phone number or inactive staff license.");
+          return;
+        }
+        let authenticatedUser = null;
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          if (data.passcode === password) {
+            authenticatedUser = {
+              username: normalizedUser,
+              name: data.name,
+              role: 'FieldStaff',
+              staffId: data.staffId,
+              docId: docSnap.id,
+              assignedWholesalerId: data.assignedWholesalerId,
+              assignedWholesalerName: data.assignedWholesalerName
+            };
+          }
+        });
+        if (authenticatedUser) {
+          onLogin(authenticatedUser);
+        } else {
+          alert("Incorrect PIN passcode.");
+        }
+      }).catch((err) => {
+        setIsVerifyingStaff(false);
+        console.error(err);
+        alert("Verification failed due to database query error.");
+      });
       return;
     }
 
@@ -58,7 +102,8 @@ export default function Login({ onLogin }) {
   const roles = [
     { id: 'Farm', icon: <Tractor className="w-5 h-5" /> },
     { id: 'Wholesaler', icon: <Building2 className="w-5 h-5" /> },
-    { id: 'Retailer', icon: <Store className="w-5 h-5" /> }
+    { id: 'Retailer', icon: <Store className="w-5 h-5" /> },
+    { id: 'Staff', icon: <Smartphone className="w-5 h-5" /> }
   ];
 
   return (
@@ -111,19 +156,19 @@ export default function Login({ onLogin }) {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  {role === 'Retailer' ? 'Mobile Number' : 'Username'}
+                  {role === 'Retailer' || role === 'Staff' ? 'Mobile Number' : 'Username'}
                 </label>
                 <div className="relative group">
                   <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                     <User className="h-5 w-5 text-slate-400 group-focus-within:text-primary-500 transition-colors" />
                   </div>
                   <input
-                    type={role === 'Retailer' ? 'tel' : 'text'}
+                    type={role === 'Retailer' || role === 'Staff' ? 'tel' : 'text'}
                     value={username}
                     disabled={otpSent}
                     onChange={(e) => setUsername(e.target.value)}
                     className="block w-full pl-11 pr-4 py-3 border border-slate-200 dark:border-slate-700 rounded-xl bg-white/70 dark:bg-slate-900/70 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all outline-none disabled:opacity-60"
-                    placeholder={role === 'Retailer' ? 'Enter 10-digit Mobile Number' : 'Enter username'}
+                    placeholder={role === 'Retailer' || role === 'Staff' ? 'Enter 10-digit Mobile Number' : 'Enter username'}
                   />
                 </div>
               </div>
@@ -157,24 +202,27 @@ export default function Login({ onLogin }) {
                         placeholder="••••••"
                       />
                     </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5 text-center">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-450 mt-1.5 text-center">
                       For testing, type the mock code <span className="font-bold text-primary-500">123456</span>
                     </p>
                   </div>
                 )
               ) : (
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Password</label>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    {role === 'Staff' ? '4-Digit PIN Passcode' : 'Password'}
+                  </label>
                   <div className="relative group">
                     <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                       <Lock className="h-5 w-5 text-slate-400 group-focus-within:text-primary-500 transition-colors" />
                     </div>
                     <input
                       type="password"
+                      maxLength={role === 'Staff' ? "6" : undefined}
                       value={password}
-                      onChange={(e) => setPassword(e.target.value)}
+                      onChange={(e) => setPassword(role === 'Staff' ? e.target.value.replace(/\D/g, '') : e.target.value)}
                       className="block w-full pl-11 pr-4 py-3 border border-slate-200 dark:border-slate-700 rounded-xl bg-white/70 dark:bg-slate-900/70 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all outline-none"
-                      placeholder="Enter password"
+                      placeholder={role === 'Staff' ? 'Enter PIN Passcode (e.g. 1234)' : 'Enter password'}
                     />
                   </div>
                 </div>
@@ -199,9 +247,12 @@ export default function Login({ onLogin }) {
 
             <button
               type="submit"
-              className="w-full flex justify-center items-center py-3.5 px-4 border border-transparent rounded-xl shadow-lg shadow-primary-500/30 text-base font-semibold text-white bg-gradient-to-r from-primary-600 to-primary-700 hover:from-primary-700 hover:to-primary-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 transition-all transform hover:-translate-y-0.5"
+              disabled={isVerifyingStaff}
+              className="w-full flex justify-center items-center py-3.5 px-4 border border-transparent rounded-xl shadow-lg shadow-primary-500/30 text-base font-semibold text-white bg-gradient-to-r from-primary-600 to-primary-700 hover:from-primary-700 hover:to-primary-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 transition-all transform hover:-translate-y-0.5 disabled:opacity-60"
             >
-              {isSendingOtp ? (
+              {isVerifyingStaff ? (
+                <span>Verifying Staff Credentials...</span>
+              ) : isSendingOtp ? (
                 <span>Sending OTP...</span>
               ) : role === 'Retailer' && loginMethod === 'otp' ? (
                 otpSent ? 'Verify & Sign In' : 'Send OTP Code'

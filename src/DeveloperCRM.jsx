@@ -3,12 +3,71 @@ import {
   Shield, Users, Database, LogOut, Menu, X, Plus, 
   Check, Lock, Edit2, Sparkles, AlertTriangle, Download, 
   Upload, Trash2, Power, Landmark, Phone, MapPin, Hash, ShieldAlert,
-  CreditCard, Smartphone, Globe, RefreshCw, AlertCircle, IndianRupee
+  CreditCard, Smartphone, Globe, RefreshCw, AlertCircle, IndianRupee,
+  Battery, Wifi, WifiOff, Search
 } from 'lucide-react';
+import { db } from './firebase';
+import { collection, onSnapshot, query, doc, deleteDoc, runTransaction, updateDoc } from 'firebase/firestore';
+
+const calculateExpiryDate = (startDateStr, plan) => {
+  if (!startDateStr) return '';
+  const date = new Date(startDateStr);
+  if (plan === 'Trial') {
+    date.setDate(date.getDate() + 30);
+  } else if (plan === 'Monthly') {
+    date.setMonth(date.getMonth() + 1);
+  } else if (plan === 'Quarterly') {
+    date.setMonth(date.getMonth() + 3);
+  } else if (plan === 'Half-Yearly') {
+    date.setMonth(date.getMonth() + 6);
+  } else if (plan === 'Yearly') {
+    date.setFullYear(date.getFullYear() + 1);
+  }
+  return date.toISOString().split('T')[0];
+};
+
+const formatDateToDDMMYY = (dateStr) => {
+  if (!dateStr) return '';
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    const year = parts[0].substring(2);
+    const month = parts[1];
+    const day = parts[2];
+    return `${day}-${month}-${year}`;
+  }
+  return dateStr;
+};
 
 export default function DeveloperCRM({ user, onLogout }) {
   const [activeTab, setActiveTab] = useState('shops');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  
+  const [fieldStaff, setFieldStaff] = useState([]);
+  const [showAddStaffModal, setShowAddStaffModal] = useState(false);
+  const [isSavingStaff, setIsSavingStaff] = useState(false);
+  const [staffSearchQuery, setStaffSearchQuery] = useState('');
+  const [newStaff, setNewStaff] = useState({
+    name: '',
+    phone: '',
+    passcode: '',
+    assignedWholesalerId: '',
+    assignedWholesalerName: '',
+    status: 'Active',
+    subscriptionPlan: 'Monthly'
+  });
+
+  useEffect(() => {
+    const q = query(collection(db, 'field_staff'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = [];
+      snapshot.forEach(doc => {
+        list.push({ docId: doc.id, ...doc.data() });
+      });
+      setFieldStaff(list);
+    });
+    return unsubscribe;
+  }, []);
+
   const [shops, setShops] = useState(() => {
     const saved = localStorage.getItem('crm_shops');
     if (saved) {
@@ -353,6 +412,152 @@ export default function DeveloperCRM({ user, onLogout }) {
     };
   };
 
+  const handleCreateStaff = async (e) => {
+    e.preventDefault();
+    if (!newStaff.name || !newStaff.phone || !newStaff.passcode || !newStaff.assignedWholesalerId) {
+      alert("Please fill in all fields and assign a wholesaler.");
+      return;
+    }
+    
+    setIsSavingStaff(true);
+    try {
+      const wholesaler = shops.find(s => s.customerUniqueId === newStaff.assignedWholesalerId);
+      const wholesalerName = wholesaler ? wholesaler.shopName : 'Momin Chicken';
+
+      await runTransaction(db, async (transaction) => {
+        const counterRef = doc(db, 'counters', 'field_staff_id');
+        const counterDoc = await transaction.get(counterRef);
+
+        let nextVal = 1001;
+        if (counterDoc.exists() && counterDoc.data().currentValue) {
+          nextVal = counterDoc.data().currentValue + 1;
+        }
+
+        transaction.set(counterRef, { currentValue: nextVal }, { merge: true });
+
+        const staffIdStr = `FS-${nextVal}`;
+        const newStaffRef = doc(collection(db, 'field_staff'));
+        
+        const todayStr = new Date().toISOString().split('T')[0];
+        const subStart = newStaff.status === 'Active' ? todayStr : '';
+        const subExpiry = newStaff.status === 'Active' ? calculateExpiryDate(todayStr, newStaff.subscriptionPlan || 'Monthly') : '';
+
+        transaction.set(newStaffRef, {
+          staffId: staffIdStr,
+          name: newStaff.name.trim(),
+          phone: newStaff.phone.trim(),
+          passcode: newStaff.passcode.trim(),
+          assignedWholesalerId: newStaff.assignedWholesalerId,
+          assignedWholesalerName: wholesalerName,
+          status: newStaff.status,
+          subscriptionPlan: newStaff.subscriptionPlan || 'Monthly',
+          registeredAt: todayStr,
+          subscriptionStartedAt: subStart,
+          subscriptionExpiredAt: subExpiry,
+          batteryPercentage: 100,
+          batteryCharging: false,
+          networkStatus: 'online',
+          lastLocation: { lat: 19.0413, lng: 72.8431, timestamp: new Date().toISOString() },
+          lastActive: new Date().toISOString(),
+          routeHistory: [
+            {
+              lat: 19.0413,
+              lng: 72.8431,
+              timestamp: new Date().toISOString(),
+              battery: 100,
+              network: 'online',
+              action: 'License Created'
+            }
+          ]
+        });
+      });
+
+      setShowAddStaffModal(false);
+      setNewStaff({
+        name: '',
+        phone: '',
+        passcode: '',
+        assignedWholesalerId: '',
+        assignedWholesalerName: '',
+        status: 'Active',
+        subscriptionPlan: 'Monthly'
+      });
+      alert("Field Staff license created successfully.");
+    } catch (err) {
+      console.error("Error creating staff license:", err);
+      alert("Failed to create field staff license. Please try again.");
+    } finally {
+      setIsSavingStaff(false);
+    }
+  };
+
+  const handleToggleStaffStatus = async (docId, currentStatus) => {
+    const newStatus = currentStatus === 'Active' ? 'Inactive' : 'Active';
+    try {
+      const staffRef = doc(db, 'field_staff', docId);
+      const staff = fieldStaff.find(s => s.docId === docId);
+      
+      const updateData = { status: newStatus };
+      if (newStatus === 'Active') {
+        const start = staff?.subscriptionStartedAt || new Date().toISOString().split('T')[0];
+        updateData.subscriptionStartedAt = start;
+        updateData.subscriptionExpiredAt = calculateExpiryDate(start, staff?.subscriptionPlan || 'Monthly');
+      }
+      await updateDoc(staffRef, updateData);
+    } catch (err) {
+      console.error("Error updating staff status:", err);
+      alert("Failed to update status.");
+    }
+  };
+
+  const handleUpdateStaffStatus = async (docId, newStatus) => {
+    try {
+      const staffRef = doc(db, 'field_staff', docId);
+      const staff = fieldStaff.find(s => s.docId === docId);
+      
+      const updateData = { status: newStatus };
+      if (newStatus === 'Active') {
+        const start = staff?.subscriptionStartedAt || new Date().toISOString().split('T')[0];
+        updateData.subscriptionStartedAt = start;
+        updateData.subscriptionExpiredAt = calculateExpiryDate(start, staff?.subscriptionPlan || 'Monthly');
+      }
+      await updateDoc(staffRef, updateData);
+    } catch (err) {
+      console.error("Error updating staff status:", err);
+      alert("Failed to update status.");
+    }
+  };
+
+  const handleUpdateStaffPlan = async (docId, newPlan) => {
+    try {
+      const staffRef = doc(db, 'field_staff', docId);
+      const staff = fieldStaff.find(s => s.docId === docId);
+      const start = staff?.subscriptionStartedAt || new Date().toISOString().split('T')[0];
+      const expiry = calculateExpiryDate(start, newPlan);
+
+      await updateDoc(staffRef, { 
+        subscriptionPlan: newPlan,
+        subscriptionExpiredAt: expiry,
+        subscriptionStartedAt: start
+      });
+    } catch (err) {
+      console.error("Error updating staff plan:", err);
+      alert("Failed to update staff license plan.");
+    }
+  };
+
+  const handleDeleteStaff = async (docId) => {
+    if (window.confirm("Are you sure you want to delete this field staff license? This will revoke mobile app access immediately.")) {
+      try {
+        const staffRef = doc(db, 'field_staff', docId);
+        await deleteDoc(staffRef);
+      } catch (err) {
+        console.error("Error deleting staff:", err);
+        alert("Failed to delete staff license.");
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 font-sans transition-colors duration-300">
       
@@ -398,6 +603,16 @@ export default function DeveloperCRM({ user, onLogout }) {
           >
             <Users className="w-5 h-5 shrink-0" />
             Shops Directory
+          </button>
+
+          <button
+            onClick={() => { setActiveTab('field_staff'); setIsMobileMenuOpen(false); }}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 text-left font-bold ${activeTab === 'field_staff'
+              ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-lg shadow-red-600/15'
+              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+          >
+            <Smartphone className="w-5 h-5 shrink-0" />
+            Field Staff Licenses
           </button>
           
           <button
@@ -717,6 +932,216 @@ export default function DeveloperCRM({ user, onLogout }) {
                   className="hidden" 
                 />
               </label>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'field_staff' && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 text-left">
+              <div>
+                <h3 className="text-xl font-extrabold">Field Staff Add-on Licenses</h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400">Generate mobile credentials, assign to wholesalers, and monitor active tracking.</p>
+              </div>
+              <button 
+                onClick={() => {
+                  const activeShops = shops.filter(s => s.status === 'Active' || s.status === 'Trial');
+                  setNewStaff(prev => ({
+                    ...prev,
+                    assignedWholesalerId: activeShops[0]?.customerUniqueId || ''
+                  }));
+                  setShowAddStaffModal(true);
+                }}
+                className="px-5 py-2.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white font-bold rounded-xl shadow-lg shadow-red-500/20 text-xs flex items-center gap-1.5 cursor-pointer transform hover:scale-105 active:scale-95 transition-all self-start"
+              >
+                <Plus className="w-4 h-4" /> Add Staff License
+              </button>
+            </div>
+
+            {/* Search Input Bar */}
+            <div className="flex items-center bg-white dark:bg-slate-900/50 p-4 rounded-2xl border border-slate-200/50 dark:border-slate-800 text-left">
+              <div className="relative w-full max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search staff by name, ID, phone, or client..."
+                  value={staffSearchQuery}
+                  onChange={e => setStaffSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-205 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500 text-xs font-semibold text-slate-805 dark:text-white"
+                />
+              </div>
+            </div>
+            {/* Field Staff Table */}
+            <div className="glass-panel rounded-3xl border border-slate-200/50 dark:border-slate-800 overflow-hidden shadow-xl bg-white dark:bg-slate-900/50">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-100 dark:border-slate-800/80">
+                      <th className="p-4 text-xs font-black uppercase text-slate-400 tracking-wider">Staff Profile</th>
+                      <th className="p-4 text-xs font-black uppercase text-slate-400 tracking-wider">Assigned Client (Wholesaler)</th>
+                      <th className="p-4 text-xs font-black uppercase text-slate-400 tracking-wider">Hardware Telemetry</th>
+                      <th className="p-4 text-xs font-black uppercase text-slate-400 tracking-wider">Last Active / Visit</th>
+                      <th className="p-4 text-xs font-black uppercase text-slate-400 tracking-wider">License Timeline</th>
+                      <th className="p-4 text-xs font-black uppercase text-slate-400 tracking-wider">License Plan</th>
+                      <th className="p-4 text-xs font-black uppercase text-slate-400 tracking-wider">License Status</th>
+                      <th className="p-4 text-xs font-black uppercase text-slate-400 tracking-wider text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {(() => {
+                      const filtered = fieldStaff.filter(staff => {
+                        const queryText = staffSearchQuery.toLowerCase();
+                        return (
+                          staff.name.toLowerCase().includes(queryText) ||
+                          staff.staffId.toLowerCase().includes(queryText) ||
+                          staff.phone.includes(queryText) ||
+                          staff.assignedWholesalerName.toLowerCase().includes(queryText)
+                        );
+                      });
+
+                      if (filtered.length > 0) {
+                        return filtered.map((staff) => {
+                          const batPct = staff.batteryPercentage ?? 100;
+                          const isCharging = staff.batteryCharging ?? false;
+                          const netStatus = staff.networkStatus ?? 'online';
+
+                          // Fallbacks for existing staff documents without timeline dates
+                          const regDate = staff.registeredAt || '2026-05-30';
+                          const actDate = staff.subscriptionStartedAt || (staff.status === 'Active' ? regDate : '');
+                          const expDate = staff.subscriptionExpiredAt || (actDate ? calculateExpiryDate(actDate, staff.subscriptionPlan || 'Monthly') : '');
+
+                          return (
+                            <tr key={staff.staffId} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-all">
+                              <td className="p-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="h-10 w-10 bg-slate-100 dark:bg-slate-800 rounded-xl flex items-center justify-center text-slate-600 dark:text-slate-300 font-bold shadow-inner">
+                                    <Smartphone className="w-5 h-5 text-red-500" />
+                                  </div>
+                                  <div>
+                                    <span className="block font-black text-slate-800 dark:text-white leading-tight">{staff.name}</span>
+                                    <span className="block text-[10px] font-mono text-slate-400 mt-1 uppercase tracking-widest">{staff.staffId}</span>
+                                    <div className="text-[10px] text-slate-500 mt-2 space-y-0.5 border-t border-slate-100 dark:border-slate-800 pt-1.5 font-medium">
+                                      <div>📱 Phone: <span className="font-semibold text-slate-700 dark:text-slate-300">{staff.phone}</span></div>
+                                      <div>🔑 Passcode: <span className="font-semibold text-slate-700 dark:text-slate-300 font-mono">{staff.passcode}</span></div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="p-4 text-sm font-semibold text-slate-605 dark:text-slate-300">
+                                <div>
+                                  <span className="block font-black text-slate-800 dark:text-white leading-tight">{staff.assignedWholesalerName}</span>
+                                  <span className="block text-[10px] font-mono text-slate-400 mt-1 uppercase tracking-widest">{staff.assignedWholesalerId}</span>
+                                </div>
+                              </td>
+                              <td className="p-4">
+                                <div className="space-y-2">
+                                  <div className="flex items-center gap-1.5 text-xs font-semibold">
+                                    <div className="relative w-7 h-4 border-2 border-slate-400 dark:border-slate-500 rounded-sm p-0.5 flex items-center shrink-0">
+                                      <div 
+                                        className={`h-full rounded-sm ${
+                                          batPct > 50 ? 'bg-emerald-500' : batPct > 20 ? 'bg-amber-500' : 'bg-rose-500 animate-pulse'
+                                        }`} 
+                                        style={{ width: `${batPct}%` }}
+                                      ></div>
+                                      <div className="absolute -right-1 top-1 w-0.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-r-sm"></div>
+                                      {isCharging && (
+                                        <span className="absolute inset-0 flex items-center justify-center text-[8px] font-bold text-white shadow-sm">⚡</span>
+                                      )}
+                                    </div>
+                                    <span className="font-bold text-slate-600 dark:text-slate-350">{batPct}%</span>
+                                  </div>
+
+                                  <div className="flex items-center gap-1 text-xs font-semibold">
+                                    {netStatus === 'online' ? (
+                                      <>
+                                        <Wifi className="w-4 h-4 text-emerald-500 shrink-0" />
+                                        <span className="text-emerald-600 dark:text-emerald-455 text-[11px]">Online</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <WifiOff className="w-4 h-4 text-rose-500 animate-pulse shrink-0" />
+                                        <span className="text-rose-600 dark:text-rose-455 text-[11px]">Offline</span>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="p-4 text-xs font-semibold text-slate-605 dark:text-slate-300">
+                                <div>
+                                  <span>{staff.lastActive ? formatDateToDDMMYY(new Date(staff.lastActive).toISOString().split('T')[0]) : ''}</span>
+                                  <span className="block text-slate-400 text-[10px] mt-0.5">
+                                    {staff.lastActive ? new Date(staff.lastActive).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Never'}
+                                  </span>
+                                  {staff.currentShopName && (
+                                    <div className="text-[10px] text-indigo-600 dark:text-indigo-400 mt-2 font-bold truncate max-w-[130px] border-t border-dashed border-slate-100 dark:border-slate-800 pt-1.5" title={`Visiting ${staff.currentShopName}`}>
+                                      📍 {staff.currentShopName}
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="p-4 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                                <div className="space-y-1 font-medium">
+                                  <div>📅 Reg: <span className="font-semibold text-slate-700 dark:text-slate-200">{formatDateToDDMMYY(regDate)}</span></div>
+                                  <div>🚀 Act: <span className="font-semibold text-slate-700 dark:text-slate-200">{actDate ? formatDateToDDMMYY(actDate) : 'Not Active'}</span></div>
+                                  <div>⏳ Exp: <span className={`font-bold ${
+                                    expDate && new Date(expDate) < new Date()
+                                      ? 'text-rose-600 dark:text-rose-455'
+                                      : 'text-slate-700 dark:text-slate-200'
+                                  }`}>{expDate ? formatDateToDDMMYY(expDate) : 'N/A'}</span></div>
+                                </div>
+                              </td>
+                              <td className="p-4">
+                                <select 
+                                  value={staff.subscriptionPlan || 'Monthly'}
+                                  onChange={(e) => handleUpdateStaffPlan(staff.docId, e.target.value)}
+                                  className="text-xs font-bold px-3 py-1.5 rounded-full outline-none border border-slate-200 dark:border-slate-700 bg-slate-50 text-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
+                                >
+                                  <option value="Trial">Trial 30 Days</option>
+                                  <option value="Monthly">Monthly</option>
+                                  <option value="Quarterly">Quarterly</option>
+                                  <option value="Half-Yearly">Half-Yearly</option>
+                                  <option value="Yearly">Yearly</option>
+                                </select>
+                              </td>
+                              <td className="p-4">
+                                <select 
+                                  value={staff.status}
+                                  onChange={(e) => handleUpdateStaffStatus(staff.docId, e.target.value)}
+                                  className={`text-xs font-bold px-3 py-1.5 rounded-full outline-none border cursor-pointer ${
+                                    staff.status === 'Active'
+                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/30'
+                                      : 'bg-slate-50 text-slate-605 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
+                                  }`}
+                                >
+                                  <option value="Active">Active</option>
+                                  <option value="Inactive">Inactive</option>
+                                </select>
+                              </td>
+                              <td className="p-4 text-right">
+                                <button 
+                                  onClick={() => handleDeleteStaff(staff.docId)}
+                                  className="p-2 text-rose-600 hover:text-rose-800 hover:bg-rose-50 dark:hover:bg-rose-955/20 rounded-xl transition-all cursor-pointer inline-flex items-center justify-center"
+                                  title="Delete staff license"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        });
+                      } else {
+                        return (
+                          <tr>
+                            <td colSpan="8" className="text-center py-12 text-slate-400 dark:text-slate-500 font-medium italic border-none bg-white dark:bg-slate-900/10">
+                              No matching field staff licenses found.
+                            </td>
+                          </tr>
+                        );
+                      }
+                    })()}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
@@ -1241,6 +1666,118 @@ export default function DeveloperCRM({ user, onLogout }) {
                 </span>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Add Staff Modal */}
+      {showAddStaffModal && (
+        <div className="fixed inset-0 bg-slate-900/60 dark:bg-slate-950/80 z-50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="glass-panel w-full max-w-md rounded-3xl p-6 md:p-8 bg-white dark:bg-slate-900 shadow-2xl relative animate-in zoom-in-95 duration-200 text-left">
+            <button 
+              onClick={() => setShowAddStaffModal(false)}
+              className="absolute top-4 right-4 p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-xl transition-all cursor-pointer"
+            >
+              <X className="w-5 h-5 text-slate-500" />
+            </button>
+
+            <h3 className="text-xl font-extrabold tracking-tight mb-2 text-slate-950 dark:text-white">Create Staff License</h3>
+            <p className="text-sm text-slate-805 dark:text-slate-300 font-semibold mb-6">Allocate credentials and link the license to a Wholesaler.</p>
+
+            <form onSubmit={handleCreateStaff} className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase text-slate-950 dark:text-slate-200 tracking-wider">Staff Full Name</label>
+                <input
+                  type="text"
+                  required
+                  value={newStaff.name}
+                  onChange={(e) => setNewStaff({ ...newStaff, name: e.target.value })}
+                  className="w-full p-2.5 border border-slate-350 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-sm outline-none text-slate-955 dark:text-white font-bold placeholder-slate-500 dark:placeholder-slate-400"
+                  placeholder="e.g. Ramesh Kumar"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-slate-950 dark:text-slate-200 tracking-wider">Mobile Number</label>
+                  <input
+                    type="tel"
+                    required
+                    pattern="[0-9]{10}"
+                    value={newStaff.phone}
+                    onChange={(e) => setNewStaff({ ...newStaff, phone: e.target.value.replace(/\D/g,'') })}
+                    className="w-full p-2.5 border border-slate-350 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-sm outline-none text-slate-955 dark:text-white font-bold placeholder-slate-500 dark:placeholder-slate-400"
+                    placeholder="10-digit number"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-slate-950 dark:text-slate-200 tracking-wider">4-Digit Login PIN</label>
+                  <input
+                    type="password"
+                    required
+                    pattern="[0-9]{4}"
+                    maxLength="4"
+                    value={newStaff.passcode}
+                    onChange={(e) => setNewStaff({ ...newStaff, passcode: e.target.value.replace(/\D/g,'') })}
+                    className="w-full p-2.5 border border-slate-350 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-sm outline-none text-slate-955 dark:text-white font-bold text-center tracking-widest text-lg placeholder-slate-500 dark:placeholder-slate-400"
+                    placeholder="••••"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase text-slate-955 dark:text-slate-205 tracking-wider">Assign Wholesaler</label>
+                <select
+                  value={newStaff.assignedWholesalerId}
+                  onChange={(e) => setNewStaff({ ...newStaff, assignedWholesalerId: e.target.value })}
+                  className="w-full p-2.5 border border-slate-350 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-sm font-bold outline-none text-slate-955 dark:text-white cursor-pointer"
+                >
+                  <option value="" disabled>-- Select Wholesaler --</option>
+                  {shops
+                    .filter(s => s.status === 'Active' || s.status === 'Trial')
+                    .map(s => {
+                      const planText = s.status === 'Trial' ? 'Trial 30 Days' : `${s.subscriptionPlan || 'Monthly'} Plan`;
+                      return (
+                        <option key={s.customerUniqueId} value={s.customerUniqueId}>
+                          {s.shopName} ({s.customerUniqueId}) - {planText}
+                        </option>
+                      );
+                    })}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase text-slate-955 dark:text-slate-205 tracking-wider">Staff License Plan</label>
+                <select
+                  value={newStaff.subscriptionPlan}
+                  onChange={(e) => setNewStaff({ ...newStaff, subscriptionPlan: e.target.value })}
+                  className="w-full p-2.5 border border-slate-350 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-sm font-bold outline-none text-slate-955 dark:text-white cursor-pointer"
+                >
+                  <option value="Trial">Trial 30 Days</option>
+                  <option value="Monthly">Monthly Plan</option>
+                  <option value="Quarterly">Quarterly Plan</option>
+                  <option value="Half-Yearly">Half-Yearly Plan</option>
+                  <option value="Yearly">Yearly Plan</option>
+                </select>
+              </div>
+
+              <div className="mt-6 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowAddStaffModal(false)}
+                  className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold transition-all text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingStaff}
+                  className="flex-[2] py-3 bg-gradient-to-r from-red-655 to-rose-655 hover:from-red-700 hover:to-rose-700 text-white rounded-xl font-bold flex justify-center items-center gap-1.5 transition-all text-xs cursor-pointer shadow-md disabled:opacity-60"
+                >
+                  {isSavingStaff ? 'Saving...' : 'Generate License'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

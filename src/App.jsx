@@ -16,6 +16,8 @@ import CrateLedger from './CrateLedger';
 import WholesaleCollections from './WholesaleCollections';
 import WholesaleReports from './WholesaleReports';
 import TruckDispatch from './TruckDispatch';
+import WholesaleStaffTracker from './WholesaleStaffTracker';
+import FieldStaffApp from './FieldStaffApp';
 import { ClipboardList } from 'lucide-react';
 import { initialProducts, shopDetails } from './data';
 import { db } from './firebase';
@@ -311,7 +313,7 @@ function App() {
       if (user.role === 'Wholesaler') {
         setAppMode('wholesale');
         setActiveTab(prev => {
-          const wholesaleTabs = ['wholesale_dashboard', 'wholesale_customers', 'wholesale_pos', 'farm_inward', 'crate_ledger', 'wholesale_collections', 'wholesale_reports', 'truck_dispatch', 'settings'];
+          const wholesaleTabs = ['wholesale_dashboard', 'wholesale_customers', 'wholesale_pos', 'farm_inward', 'crate_ledger', 'wholesale_collections', 'wholesale_reports', 'truck_dispatch', 'wholesale_staff_tracker', 'settings'];
           return wholesaleTabs.includes(prev) ? prev : 'wholesale_dashboard';
         });
       } else if (user.role === 'Retailer') {
@@ -359,6 +361,10 @@ function App() {
 
   if (user && user.role === 'developer_admin') {
     return <DeveloperCRM user={user} onLogout={() => setUser(null)} />;
+  }
+
+  if (user && user.role === 'FieldStaff') {
+    return <FieldStaffApp user={user} onLogout={() => setUser(null)} />;
   }
 
   if (user && user.role !== 'developer_admin' && isSuspended) {
@@ -546,6 +552,7 @@ function App() {
               <NavItem mode={appMode} icon={<Truck />} label="Farm Inwards" active={activeTab === 'farm_inward'} onClick={() => { setActiveTab('farm_inward'); setIsMobileMenuOpen(false); }} />
               <NavItem mode={appMode} icon={<Package />} label="Crate Ledger" active={activeTab === 'crate_ledger'} onClick={() => { setActiveTab('crate_ledger'); setIsMobileMenuOpen(false); }} />
               <NavItem mode={appMode} icon={<FileText />} label="Collections" active={activeTab === 'wholesale_collections'} onClick={() => { setActiveTab('wholesale_collections'); setIsMobileMenuOpen(false); }} />
+              <NavItem mode={appMode} icon={<Smartphone />} label="Staff Tracker" active={activeTab === 'wholesale_staff_tracker'} onClick={() => { setActiveTab('wholesale_staff_tracker'); setIsMobileMenuOpen(false); }} />
               <NavItem mode={appMode} icon={<FileText />} label="Reports" active={activeTab === 'wholesale_reports'} onClick={() => { setActiveTab('wholesale_reports'); setIsMobileMenuOpen(false); }} />
             </>
           )}
@@ -617,7 +624,7 @@ function App() {
             </div>
             <div className={`h-10 w-10 rounded-full flex items-center justify-center border shrink-0 ${
               appMode === 'wholesale'
-                ? 'bg-emerald-50 dark:bg-emerald-950 border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-455'
+                ? 'bg-emerald-50 dark:bg-emerald-950 border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400'
                 : 'bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-400'
             }`}>
               <User className="w-5 h-5" />
@@ -792,6 +799,10 @@ function App() {
 
         {activeTab === 'wholesale_collections' && (
           <WholesaleCollections />
+        )}
+
+        {activeTab === 'wholesale_staff_tracker' && (
+          <WholesaleStaffTracker />
         )}
 
         {activeTab === 'wholesale_reports' && (
