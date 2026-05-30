@@ -180,13 +180,18 @@ export default function FieldStaffApp({ user, onLogout }) {
     }
 
     // 6b. Try getting device battery stats
-    let batteryPercentage = staffData?.batteryPercentage || 100;
-    let batteryCharging = staffData?.batteryCharging || false;
+    // Note: Battery Status API is not supported on iOS Safari (removed for privacy)
+    let batteryPercentage = null; // null = unavailable, not a fake value
+    let batteryCharging = false;
     try {
       if (navigator.getBattery) {
         const battery = await navigator.getBattery();
-        batteryPercentage = Math.round(battery.level * 100);
-        batteryCharging = battery.charging;
+        const level = Math.round(battery.level * 100);
+        // Sanity check: getBattery sometimes returns 100 even on iOS when unsupported
+        if (level > 0 && level <= 100) {
+          batteryPercentage = level;
+          batteryCharging = battery.charging;
+        }
       }
     } catch (err) {
       console.warn("Battery API not supported:", err);
@@ -256,7 +261,7 @@ export default function FieldStaffApp({ user, onLogout }) {
     setGpsLoading(true);
     let initialLat = 19.0413;
     let initialLng = 72.8431;
-    let batteryPercentage = 100;
+    let batteryPercentage = null; // null = unavailable
     let batteryCharging = false;
 
     // Trigger explicit GPS permissions dialog on start shift
@@ -281,11 +286,14 @@ export default function FieldStaffApp({ user, onLogout }) {
     try {
       if (navigator.getBattery) {
         const battery = await navigator.getBattery();
-        batteryPercentage = Math.round(battery.level * 100);
-        batteryCharging = battery.charging;
+        const level = Math.round(battery.level * 100);
+        if (level > 0 && level <= 100) {
+          batteryPercentage = level;
+          batteryCharging = battery.charging;
+        }
       }
     } catch (e) {
-      console.warn(e);
+      console.warn('Battery API unavailable:', e);
     }
 
     const timestamp = new Date().toISOString();
@@ -569,6 +577,7 @@ export default function FieldStaffApp({ user, onLogout }) {
   };
 
   const getBatteryColor = (pct) => {
+    if (pct === null || pct === undefined) return 'text-gray-400';
     if (pct <= 20) return 'text-[#ff3b30]';
     if (pct <= 50) return 'text-[#ff9500]';
     return 'text-[#34c759]';
@@ -659,9 +668,9 @@ export default function FieldStaffApp({ user, onLogout }) {
             {/* Battery state overlay */}
             {staffData && (
               <div className="flex items-center gap-1.5 bg-[#f2f2f7] px-2.5 py-1 rounded-full border border-gray-200 text-xs font-semibold text-gray-700">
-                <Battery className={`w-3.5 h-3.5 ${getBatteryColor(staffData.batteryPercentage ?? 100)}`} />
-                <span>{staffData.batteryPercentage ?? 100}%</span>
-                {staffData.batteryCharging && <span className="text-[#ff9500] text-[10px]">⚡</span>}
+                <Battery className={`w-3.5 h-3.5 ${getBatteryColor(staffData.batteryPercentage ?? null)}`} />
+                <span>{staffData.batteryPercentage != null ? `${staffData.batteryPercentage}%` : 'N/A'}</span>
+                {staffData.batteryCharging && staffData.batteryPercentage != null && <span className="text-[#ff9500] text-[10px]">⚡</span>}
               </div>
             )}
           </div>
@@ -1008,7 +1017,7 @@ export default function FieldStaffApp({ user, onLogout }) {
                         <div className="flex justify-between items-center text-[10px] text-gray-400 font-bold font-mono mb-1.5">
                           <span>{logTime}</span>
                           <span className="flex items-center gap-1">
-                            🔋 {log.battery ?? 100}% | {log.network === 'online' ? '📶 Online' : '⚠️ Offline'}
+                            🔋 {log.battery != null ? `${log.battery}%` : 'N/A'} | {log.network === 'online' ? '📶 Online' : '⚠️ Offline'}
                           </span>
                         </div>
                         <p className="text-xs font-semibold text-gray-800 leading-relaxed">{log.action}</p>
