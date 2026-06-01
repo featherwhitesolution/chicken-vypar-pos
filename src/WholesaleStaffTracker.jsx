@@ -300,9 +300,16 @@ export default function WholesaleStaffTracker() {
         attributionControl: false
       }).setView([19.0413, 72.8431], 12);
 
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      const isDark = document.documentElement.classList.contains('dark') || document.body.classList.contains('dark');
+      const tileUrl = isDark 
+        ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+        : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+
+      L.tileLayer(tileUrl, {
         maxZoom: 18,
         minZoom: 10,
+        subdomains: 'abcd',
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
       }).addTo(mapInstanceRef.current);
 
       L.control.attribution({ prefix: false }).addTo(mapInstanceRef.current);
