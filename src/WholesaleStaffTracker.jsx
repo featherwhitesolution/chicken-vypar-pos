@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { db } from './firebase';
-import { collection, onSnapshot, query, where, doc, updateDoc, addDoc, increment, getDoc } from 'firebase/firestore';
+import { supabase } from './supabase';
 import { 
   Smartphone, Battery, Wifi, WifiOff, MapPin, History, User, 
   DollarSign, Activity, ChevronRight, ChevronLeft, Play, Zap, AlertTriangle, 
@@ -176,54 +175,112 @@ export default function WholesaleStaffTracker() {
   // Fetch assigned field staff
   useEffect(() => {
     setIsLoading(true);
-    const q = query(
-      collection(db, 'field_staff'),
-      where('assignedWholesalerId', '==', wholesalerId)
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = [];
-      snapshot.forEach(docSnap => {
-        list.push({ docId: docSnap.id, ...docSnap.data() });
-      });
-      setStaffList(list);
-      setIsLoading(false);
-      
-      // Auto-select first staff or update selected staff reference
-      if (list.length > 0) {
-        setSelectedStaff(prev => {
-          if (!prev) return list[0];
-          const updated = list.find(s => s.docId === prev.docId);
-          return updated || list[0];
-        });
-      } else {
-        setSelectedStaff(null);
+    
+    const fetchStaff = async () => {
+      const { data, error } = await supabase
+        .from('field_staff')
+        .select('*')
+        .eq('assigned_wholesaler_id', wholesalerId);
+      if (!error && data) {
+        const list = data.map(row => ({
+          docId: row.id,
+          staffId: row.staff_id,
+          name: row.name,
+          phone: row.phone,
+          passcode: row.passcode,
+          status: row.status,
+          subscriptionPlan: row.subscription_plan,
+          registeredAt: row.registered_at,
+          subscriptionStartedAt: row.subscription_started_at,
+          subscriptionExpiredAt: row.subscription_expired_at,
+          assignedWholesalerId: row.assigned_wholesaler_id,
+          assignedWholesalerName: row.assigned_wholesaler_name,
+          lastLocation: {
+            lat: row.last_location_lat,
+            lng: row.last_location_lng,
+            timestamp: row.last_location_time
+          },
+          lastActive: row.last_active,
+          batteryPercentage: row.battery_percentage,
+          batteryCharging: row.battery_charging,
+          networkStatus: row.network_status,
+          routeHistory: typeof row.route_history === 'string' ? JSON.parse(row.route_history) : (row.route_history || []),
+          currentShopId: row.current_shop_id,
+          currentShopName: row.current_shop_name,
+          minutesSpentAtCurrentShop: row.minutes_spent_at_current_shop
+        }));
+        setStaffList(list);
+        
+        if (list.length > 0) {
+          setSelectedStaff(prev => {
+            if (!prev) return list[0];
+            const updated = list.find(s => s.docId === prev.docId);
+            return updated || list[0];
+          });
+        } else {
+          setSelectedStaff(null);
+        }
       }
-    });
+      setIsLoading(false);
+    };
 
-    return unsubscribe;
+    fetchStaff();
+
+    // Subscribe to real-time changes
+    const channel = supabase
+      .channel('field-staff-tracker-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'field_staff' }, () => {
+        fetchStaff();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [wholesalerId]);
 
   // Fetch customers for map coordinates
   useEffect(() => {
-    const q = collection(db, 'wholesale_customers');
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = [];
-      snapshot.forEach(docSnap => {
-        const data = docSnap.data();
-        let location = data.location;
-        if (!location || !location.lat || !location.lng) {
-          const hash = (data.uniqueId || docSnap.id || '').split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-          // Distribute customers around Mumbai (19.0760, 72.8777)
-          const mockLat = 19.0413 + 0.02 * Math.sin(hash);
-          const mockLng = 72.8431 + 0.03 * Math.cos(hash);
-          location = { lat: mockLat, lng: mockLng };
-        }
-        list.push({ id: docSnap.id, ...data, location });
-      });
-      setCustomers(list);
-    });
-    return unsubscribe;
+    const fetchCustomers = async () => {
+      const { data, error } = await supabase
+        .from('wholesale_customers')
+        .select('*');
+      if (!error && data) {
+        const list = data.map(row => {
+          let location = { lat: row.location_lat, lng: row.location_lng };
+          if (!location.lat || !location.lng) {
+            const hash = (row.unique_id || row.id || '').split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+            const mockLat = 19.0413 + 0.02 * Math.sin(hash);
+            const mockLng = 72.8431 + 0.03 * Math.cos(hash);
+            location = { lat: mockLat, lng: mockLng };
+          }
+          return {
+            id: row.id,
+            shopName: row.shop_name,
+            proprietorName: row.proprietor_name,
+            uniqueId: row.unique_id,
+            route: row.route,
+            area: row.area,
+            outstandingBalance: row.outstanding_balance,
+            location
+          };
+        });
+        setCustomers(list);
+      }
+    };
+
+    fetchCustomers();
+
+    const channel = supabase
+      .channel('wholesale-customers-tracker-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wholesale_customers' }, () => {
+        fetchCustomers();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const mappedCustomers = customers.filter(c => c.location && c.location.lat && c.location.lng);
@@ -438,19 +495,19 @@ export default function WholesaleStaffTracker() {
         }
       ];
 
-      const staffRef = doc(db, 'field_staff', selectedStaff.docId);
-      await updateDoc(staffRef, {
-        lastLocation: {
-          lat: customer.location.lat,
-          lng: customer.location.lng,
-          timestamp
-        },
-        lastActive: timestamp,
-        currentShopId: customer.id,
-        currentShopName: customer.shopName,
-        minutesSpentAtCurrentShop: Math.floor(Math.random() * 20) + 5, // Random demo check-in minutes
-        routeHistory: updatedHistory
-      });
+      await supabase
+        .from('field_staff')
+        .update({
+          last_location_lat: customer.location.lat,
+          last_location_lng: customer.location.lng,
+          last_location_time: timestamp,
+          last_active: timestamp,
+          current_shop_id: customer.id,
+          current_shop_name: customer.shopName,
+          minutes_spent_at_current_shop: Math.floor(Math.random() * 20) + 5, // Random demo check-in minutes
+          route_history: updatedHistory
+        })
+        .eq('id', selectedStaff.docId);
 
       setSimSelectedCustomer('');
     } catch (err) {
@@ -478,21 +535,25 @@ export default function WholesaleStaffTracker() {
       const dateStr = timestamp.split('T')[0];
 
       // Add to payments collection
-      await addDoc(collection(db, 'wholesale_payments'), {
-        customerId: selectedStaff.currentShopId,
-        customerName: selectedStaff.currentShopName,
+      await supabase.from('wholesale_payments').insert({
+        customer_id: selectedStaff.currentShopId,
+        customer_name: selectedStaff.currentShopName,
         amount,
-        paymentMethod: 'Cash',
+        payment_method: 'Cash',
         notes: `Collected by field staff: ${selectedStaff.name}`,
-        date: dateStr,
-        timestamp
+        payment_date: dateStr,
+        created_at: timestamp
       });
 
       // Subtract from customer outstandingBalance
-      const customerRef = doc(db, 'wholesale_customers', selectedStaff.currentShopId);
-      await updateDoc(customerRef, {
-        outstandingBalance: increment(-amount)
-      });
+      const customer = customers.find(c => c.id === selectedStaff.currentShopId);
+      const currentOutstanding = customer ? Number(customer.outstandingBalance || 0) : 0;
+      await supabase
+        .from('wholesale_customers')
+        .update({
+          outstanding_balance: currentOutstanding - amount
+        })
+        .eq('id', selectedStaff.currentShopId);
 
       // Update staff timeline
       const currentHistory = selectedStaff.routeHistory || [];
@@ -508,11 +569,13 @@ export default function WholesaleStaffTracker() {
         }
       ];
 
-      const staffRef = doc(db, 'field_staff', selectedStaff.docId);
-      await updateDoc(staffRef, {
-        lastActive: timestamp,
-        routeHistory: updatedHistory
-      });
+      await supabase
+        .from('field_staff')
+        .update({
+          last_active: timestamp,
+          route_history: updatedHistory
+        })
+        .eq('id', selectedStaff.docId);
 
       setSimCollectionAmount('');
     } catch (err) {
@@ -528,7 +591,6 @@ export default function WholesaleStaffTracker() {
     setSimBattery(newVal);
 
     try {
-      const staffRef = doc(db, 'field_staff', selectedStaff.docId);
       const timestamp = new Date().toISOString();
       const currentHistory = selectedStaff.routeHistory || [];
       
@@ -546,11 +608,14 @@ export default function WholesaleStaffTracker() {
         newLog.action = `🚨 CRITICAL BATTERY ALERT: ${newVal}%`;
       }
 
-      await updateDoc(staffRef, {
-        batteryPercentage: newVal,
-        lastActive: timestamp,
-        routeHistory: [...currentHistory, newLog]
-      });
+      await supabase
+        .from('field_staff')
+        .update({
+          battery_percentage: newVal,
+          last_active: timestamp,
+          route_history: [...currentHistory, newLog]
+        })
+        .eq('id', selectedStaff.docId);
     } catch (e) {
       console.error(e);
     }
@@ -562,25 +627,27 @@ export default function WholesaleStaffTracker() {
     setSimCharging(nextCharging);
 
     try {
-      const staffRef = doc(db, 'field_staff', selectedStaff.docId);
       const timestamp = new Date().toISOString();
       const currentHistory = selectedStaff.routeHistory || [];
 
-      await updateDoc(staffRef, {
-        batteryCharging: nextCharging,
-        lastActive: timestamp,
-        routeHistory: [
-          ...currentHistory,
-          {
-            lat: selectedStaff.lastLocation.lat,
-            lng: selectedStaff.lastLocation.lng,
-            timestamp,
-            battery: selectedStaff.batteryPercentage,
-            network: selectedStaff.networkStatus,
-            action: nextCharging ? "⚡ Power Charger Connected" : "🔌 Power Charger Disconnected"
-          }
-        ]
-      });
+      await supabase
+        .from('field_staff')
+        .update({
+          battery_charging: nextCharging,
+          last_active: timestamp,
+          route_history: [
+            ...currentHistory,
+            {
+              lat: selectedStaff.lastLocation.lat,
+              lng: selectedStaff.lastLocation.lng,
+              timestamp,
+              battery: selectedStaff.batteryPercentage,
+              network: selectedStaff.networkStatus,
+              action: nextCharging ? "⚡ Power Charger Connected" : "🔌 Power Charger Disconnected"
+            }
+          ]
+        })
+        .eq('id', selectedStaff.docId);
     } catch (e) {
       console.error(e);
     }
@@ -591,25 +658,27 @@ export default function WholesaleStaffTracker() {
     const nextNetwork = selectedStaff.networkStatus === 'online' ? 'offline' : 'online';
 
     try {
-      const staffRef = doc(db, 'field_staff', selectedStaff.docId);
       const timestamp = new Date().toISOString();
       const currentHistory = selectedStaff.routeHistory || [];
 
-      await updateDoc(staffRef, {
-        networkStatus: nextNetwork,
-        lastActive: timestamp,
-        routeHistory: [
-          ...currentHistory,
-          {
-            lat: selectedStaff.lastLocation.lat,
-            lng: selectedStaff.lastLocation.lng,
-            timestamp,
-            battery: selectedStaff.batteryPercentage,
-            network: nextNetwork,
-            action: nextNetwork === 'online' ? "📶 Network Connected" : "⚠️ Network Disconnected / Offline"
-          }
-        ]
-      });
+      await supabase
+        .from('field_staff')
+        .update({
+          network_status: nextNetwork,
+          last_active: timestamp,
+          route_history: [
+            ...currentHistory,
+            {
+              lat: selectedStaff.lastLocation.lat,
+              lng: selectedStaff.lastLocation.lng,
+              timestamp,
+              battery: selectedStaff.batteryPercentage,
+              network: nextNetwork,
+              action: nextNetwork === 'online' ? "📶 Network Connected" : "⚠️ Network Disconnected / Offline"
+            }
+          ]
+        })
+        .eq('id', selectedStaff.docId);
     } catch (e) {
       console.error(e);
     }
@@ -623,24 +692,26 @@ export default function WholesaleStaffTracker() {
       const timestamp = new Date().toISOString();
       const currentHistory = selectedStaff.routeHistory || [];
 
-      const staffRef = doc(db, 'field_staff', selectedStaff.docId);
-      await updateDoc(staffRef, {
-        lastActive: timestamp,
-        currentShopId: '',
-        currentShopName: '',
-        minutesSpentAtCurrentShop: 0,
-        routeHistory: [
-          ...currentHistory,
-          {
-            lat: selectedStaff.lastLocation.lat,
-            lng: selectedStaff.lastLocation.lng,
-            timestamp,
-            battery: selectedStaff.batteryPercentage,
-            network: selectedStaff.networkStatus,
-            action: "🏁 Shift Ended"
-          }
-        ]
-      });
+      await supabase
+        .from('field_staff')
+        .update({
+          last_active: timestamp,
+          current_shop_id: '',
+          current_shop_name: '',
+          minutes_spent_at_current_shop: 0,
+          route_history: [
+            ...currentHistory,
+            {
+              lat: selectedStaff.lastLocation.lat,
+              lng: selectedStaff.lastLocation.lng,
+              timestamp,
+              battery: selectedStaff.batteryPercentage,
+              network: selectedStaff.networkStatus,
+              action: "🏁 Shift Ended"
+            }
+          ]
+        })
+        .eq('id', selectedStaff.docId);
     } catch (e) {
       console.error(e);
     } finally {

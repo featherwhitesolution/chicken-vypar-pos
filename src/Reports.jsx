@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, Download, Printer, FileSpreadsheet, FileText, Filter, Factory } from 'lucide-react';
-import { db } from './firebase';
-import { collection, query, orderBy, onSnapshot, addDoc } from 'firebase/firestore';
+import { supabase } from './supabase';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
@@ -56,52 +55,104 @@ export default function Reports() {
 
   // Fetch all required data once
   useEffect(() => {
-    // 1. Fetch Stock Inwards
-    const qInwards = query(collection(db, 'stock_inwards'), orderBy('timestamp', 'desc'));
-    const unSubInwards = onSnapshot(qInwards, (snapshot) => {
-      const data = [];
-      snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
-      setStockInwards(data);
-    });
+    const fetchAllData = async () => {
+      // 1. Fetch Stock Inwards
+      const { data: stockData } = await supabase.from('stock_inwards').select('*').order('created_at', { ascending: false });
+      if (stockData) {
+        setStockInwards(stockData.map(row => ({
+          id: row.id,
+          supplierId: Number(row.supplier_id),
+          supplierName: row.supplier_name,
+          vehicleNo: row.vehicle_no,
+          rate: Number(row.rate),
+          weight: Number(row.weight),
+          numberOfBirds: Number(row.number_of_birds),
+          chickenType: row.chicken_type,
+          paymentMode: row.payment_mode,
+          chequeDate: row.cheque_date,
+          chequeNumber: row.cheque_number,
+          bankName: row.bank_name,
+          totalValue: Number(row.total_value),
+          timestamp: { toDate: () => new Date(row.created_at) }
+        })));
+      }
 
-    // 2. Fetch Supplier Payments
-    const qPayments = query(collection(db, 'supplier_payments'), orderBy('timestamp', 'desc'));
-    const unSubPayments = onSnapshot(qPayments, (snapshot) => {
-      const data = [];
-      snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
-      setSupplierPayments(data);
-    });
+      // 2. Fetch Supplier Payments
+      const { data: paymentsData } = await supabase.from('supplier_payments').select('*').order('created_at', { ascending: false });
+      if (paymentsData) {
+        setSupplierPayments(paymentsData.map(row => ({
+          id: row.id,
+          supplierId: Number(row.supplier_id),
+          supplierName: row.supplier_name,
+          amount: Number(row.amount),
+          paymentMode: row.payment_method,
+          purchaseType: row.purchase_type,
+          referenceNo: row.reference_no,
+          bankName: row.bank_name,
+          notes: row.notes,
+          paymentDate: row.payment_date,
+          timestamp: { toDate: () => new Date(row.created_at) }
+        })));
+      }
 
-    // 3. Fetch Sales
-    const qSales = query(collection(db, 'sales'), orderBy('timestamp', 'desc'));
-    const unSubSales = onSnapshot(qSales, (snapshot) => {
-      const data = [];
-      snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
-      setSales(data);
-    });
+      // 3. Fetch Sales
+      const { data: salesData } = await supabase.from('sales').select('*').order('created_at', { ascending: false });
+      if (salesData) {
+        setSales(salesData.map(row => ({
+          id: row.id,
+          billNumber: row.bill_number,
+          date: row.date,
+          items: typeof row.items === 'string' ? JSON.parse(row.items) : (row.items || []),
+          subtotal: Number(row.subtotal),
+          discount: Number(row.discount),
+          total: Number(row.total),
+          paymentMethod: row.payment_method,
+          workerName: row.worker_name,
+          shift: row.shift,
+          timestamp: { toDate: () => new Date(row.created_at) }
+        })));
+      }
 
-    // 4. Fetch Expenses
-    const qExpenses = query(collection(db, 'expenses'), orderBy('timestamp', 'desc'));
-    const unSubExpenses = onSnapshot(qExpenses, (snapshot) => {
-      const data = [];
-      snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
-      setExpenses(data);
-    });
+      // 4. Fetch Expenses
+      const { data: expensesData } = await supabase.from('expenses').select('*').order('created_at', { ascending: false });
+      if (expensesData) {
+        setExpenses(expensesData.map(row => ({
+          id: row.id,
+          date: row.date,
+          name: row.name,
+          amount: Number(row.amount),
+          paymentMode: row.payment_mode,
+          timestamp: { toDate: () => new Date(row.created_at) }
+        })));
+      }
 
-    // 5. Fetch Mortality
-    const qMortality = query(collection(db, 'mortality'), orderBy('timestamp', 'desc'));
-    const unSubMortality = onSnapshot(qMortality, (snapshot) => {
-      const data = [];
-      snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
-      setMortality(data);
-    });
+      // 5. Fetch Mortality
+      const { data: mortData } = await supabase.from('mortality').select('*').order('created_at', { ascending: false });
+      if (mortData) {
+        setMortality(mortData.map(row => ({
+          id: row.id,
+          date: row.date,
+          birdsDead: Number(row.birds_dead),
+          weightLoss: Number(row.weight_loss),
+          reason: row.reason,
+          timestamp: { toDate: () => new Date(row.created_at) }
+        })));
+      }
+    };
+
+    fetchAllData();
+
+    const channel = supabase
+      .channel('reports-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_inwards' }, fetchAllData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'supplier_payments' }, fetchAllData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, fetchAllData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, fetchAllData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mortality' }, fetchAllData)
+      .subscribe();
 
     return () => {
-      unSubInwards();
-      unSubPayments();
-      unSubSales();
-      unSubExpenses();
-      unSubMortality();
+      supabase.removeChannel(channel);
     };
   }, []);
 

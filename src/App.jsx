@@ -20,8 +20,8 @@ import WholesaleStaffTracker from './WholesaleStaffTracker';
 import FieldStaffApp from './FieldStaffApp';
 import { ClipboardList } from 'lucide-react';
 import { initialProducts, shopDetails } from './data';
-import { db } from './firebase';
-import { collection, onSnapshot, query, orderBy, setDoc, doc, writeBatch } from 'firebase/firestore';
+import { supabase } from './supabase';
+
 
 function App() {
   const [activeTab, setActiveTab] = useState(() => {
@@ -152,13 +152,7 @@ function App() {
 
         let itemDate = null;
         if (data.timestamp) {
-          if (typeof data.timestamp.toDate === 'function') {
-            itemDate = data.timestamp.toDate();
-          } else if (data.timestamp instanceof Date) {
-            itemDate = data.timestamp;
-          } else {
-            itemDate = new Date(data.timestamp);
-          }
+          itemDate = new Date(data.timestamp);
         }
 
         if (itemDate && itemDate >= todayMidnight) {
@@ -193,13 +187,7 @@ function App() {
         // Today's sales sum
         let saleDate = null;
         if (data.timestamp) {
-          if (typeof data.timestamp.toDate === 'function') {
-            saleDate = data.timestamp.toDate();
-          } else if (data.timestamp instanceof Date) {
-            saleDate = data.timestamp;
-          } else {
-            saleDate = new Date(data.timestamp);
-          }
+          saleDate = new Date(data.timestamp);
         }
 
         if (saleDate && saleDate >= todayMidnight) {
@@ -248,52 +236,139 @@ function App() {
       setTodaySales(salesSumToday);
     };
 
-    const unsubStock = onSnapshot(collection(db, "stock_inwards"), (snapshot) => {
-      stockList = [];
-      snapshot.forEach(doc => stockList.push({ id: doc.id, ...doc.data() }));
-      computeStats();
-    });
+    const fetchStock = async () => {
+      const { data, error } = await supabase.from('stock_inwards').select('*');
+      if (!error && data) {
+        stockList = data.map(row => ({
+          id: row.id,
+          supplierName: row.supplier_name,
+          chickenType: row.chicken_type,
+          weight: Number(row.weight),
+          rate: Number(row.rate),
+          numberOfBirds: row.number_of_birds,
+          vehicleNo: row.vehicle_no,
+          timestamp: row.created_at
+        }));
+        computeStats();
+      }
+    };
 
-    const unsubSales = onSnapshot(collection(db, "sales"), (snapshot) => {
-      salesList = [];
-      snapshot.forEach(doc => salesList.push({ id: doc.id, ...doc.data() }));
-      computeStats();
-    });
+    const fetchSales = async () => {
+      const { data, error } = await supabase.from('sales').select('*');
+      if (!error && data) {
+        salesList = data.map(row => ({
+          id: row.id,
+          billNumber: row.bill_number,
+          date: row.date,
+          items: typeof row.items === 'string' ? JSON.parse(row.items) : (row.items || []),
+          subtotal: Number(row.subtotal),
+          discount: Number(row.discount),
+          total: Number(row.total),
+          paymentMode: row.payment_mode,
+          timestamp: row.created_at
+        }));
+        computeStats();
+      }
+    };
 
-    const unsubMortality = onSnapshot(collection(db, "mortality"), (snapshot) => {
-      mortalityList = [];
-      snapshot.forEach(doc => mortalityList.push({ id: doc.id, ...doc.data() }));
-      computeStats();
-    });
+    const fetchMortality = async () => {
+      const { data, error } = await supabase.from('mortality').select('*');
+      if (!error && data) {
+        mortalityList = data.map(row => ({
+          id: row.id,
+          date: row.date,
+          weightLoss: Number(row.weight_loss),
+          count: row.count,
+          reason: row.reason,
+          timestamp: row.created_at
+        }));
+        computeStats();
+      }
+    };
+
+    fetchStock();
+    fetchSales();
+    fetchMortality();
+
+    const stockChannel = supabase
+      .channel('stock-inwards-channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_inwards' }, () => {
+        fetchStock();
+      })
+      .subscribe();
+
+    const salesChannel = supabase
+      .channel('sales-channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, () => {
+        fetchSales();
+      })
+      .subscribe();
+
+    const mortalityChannel = supabase
+      .channel('mortality-channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mortality' }, () => {
+        fetchMortality();
+      })
+      .subscribe();
 
     return () => {
-      unsubStock();
-      unsubSales();
-      unsubMortality();
+      supabase.removeChannel(stockChannel);
+      supabase.removeChannel(salesChannel);
+      supabase.removeChannel(mortalityChannel);
     };
   }, [user]);
 
   // Sync retail_products
   useEffect(() => {
     if (!user) return;
-    const unsubProducts = onSnapshot(query(collection(db, 'retail_products'), orderBy('id')), async (snapshot) => {
-      if (snapshot.empty) {
-        // Seed database
-        const batch = writeBatch(db);
-        initialProducts.forEach(p => {
-          const docRef = doc(collection(db, 'retail_products'), p.id.toString());
-          batch.set(docRef, p);
-        });
-        await batch.commit();
-      } else {
-        const list = [];
-        snapshot.forEach(docSnap => {
-          list.push({ docId: docSnap.id, ...docSnap.data() });
-        });
-        setProducts(list);
+    const fetchProducts = async () => {
+      const { data, error } = await supabase
+        .from('retail_products')
+        .select('*')
+        .order('id', { ascending: true });
+      if (!error && data) {
+        if (data.length === 0) {
+          // Seed database
+          const seedData = initialProducts.map(p => ({
+            id: p.id,
+            name: p.name,
+            rate: p.rate,
+            category: p.category,
+            unit: p.unit,
+            is_weight_based: p.isWeightBased,
+            is_active: p.isActive,
+            sort_order: p.sortOrder
+          }));
+          await supabase.from('retail_products').insert(seedData);
+          fetchProducts();
+        } else {
+          const list = data.map(row => ({
+            id: row.id,
+            docId: row.id.toString(),
+            name: row.name,
+            rate: Number(row.rate),
+            category: row.category,
+            unit: row.unit,
+            isWeightBased: row.is_weight_based,
+            isActive: row.is_active,
+            sortOrder: row.sort_order
+          }));
+          setProducts(list);
+        }
       }
-    });
-    return () => unsubProducts();
+    };
+    fetchProducts();
+
+    const channel = supabase
+      .channel('retail-products-channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'retail_products' }, () => {
+        fetchProducts();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user]);
 
   useEffect(() => {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, Save, CheckCircle2, UserPlus, MapPin, Compass, Phone, Loader2, Navigation, Trash2, Map, List, ChevronDown, X } from 'lucide-react';
-import { db } from './firebase';
-import { collection, addDoc, onSnapshot, query, orderBy, deleteDoc, doc, runTransaction } from 'firebase/firestore';
+import { supabase } from './supabase';
+
 
 // Each area: { name, type }
 // Types: 'Residential', 'Commercial', 'Market', 'Industrial', 'Mixed'
@@ -333,13 +333,42 @@ export default function WholesaleCustomers() {
 
   // Fetch customers
   useEffect(() => {
-    const q = query(collection(db, 'wholesale_customers'), orderBy('shopName', 'asc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = [];
-      snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
-      setCustomers(data);
-    });
-    return unsubscribe;
+    const fetchCustomers = async () => {
+      const { data, error } = await supabase
+        .from('wholesale_customers')
+        .select('*')
+        .order('shop_name', { ascending: true });
+      if (!error && data) {
+        const list = data.map(row => ({
+          id: row.id,
+          shopName: row.shop_name,
+          proprietorName: row.proprietor_name,
+          phone: row.phone,
+          state: row.state,
+          city: row.city,
+          area: row.area,
+          route: row.route,
+          rateOffset: Number(row.rate_offset),
+          location: row.location_lat && row.location_lng ? { lat: row.location_lat, lng: row.location_lng } : null,
+          createdAt: row.created_at,
+          uniqueId: row.unique_id,
+          outstandingBalance: row.outstanding_balance
+        }));
+        setCustomers(list);
+      }
+    };
+    fetchCustomers();
+
+    const channel = supabase
+      .channel('wholesale-customers-dir')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wholesale_customers' }, () => {
+        fetchCustomers();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const handleStateChange = (stateVal) => {
@@ -382,38 +411,34 @@ export default function WholesaleCustomers() {
     }
     setIsSaving(true);
     try {
-      await runTransaction(db, async (transaction) => {
-        // Reference to the global counter
-        const counterRef = doc(db, 'counters', 'wholesale_customer_id');
-        const counterDoc = await transaction.get(counterRef);
-        
-        let nextVal = 1000; // Starting value if no counter exists
-        if (counterDoc.exists() && counterDoc.data().currentValue) {
-          nextVal = counterDoc.data().currentValue + 1;
-        }
-        
-        // Update the counter
-        transaction.set(counterRef, { currentValue: nextVal }, { merge: true });
+      const { data: countData, error: countError } = await supabase
+        .from('wholesale_customers')
+        .select('unique_id');
+      if (countError) throw countError;
+      
+      const nextVal = 1000 + (countData ? countData.length : 0) + 1;
 
-        // Prepare the new customer document
-        const newCustomerRef = doc(collection(db, 'wholesale_customers'));
-        const payload = {
-          shopName: formData.shopName.trim(),
-          proprietorName: formData.proprietorName.trim(),
-          phone: formData.phone.trim(),
-          state: formData.state,
-          city: formData.city,
-          area: formData.area,
-          route: formData.area,
-          rateOffset: parseFloat(formData.rateOffset) || 0,
-          location: formData.location,
-          createdAt: new Date().toISOString(),
-          uniqueId: `CV-${nextVal}`
-        };
-        
-        // Save the customer
-        transaction.set(newCustomerRef, payload);
-      });
+      const payload = {
+        shop_name: formData.shopName.trim(),
+        proprietor_name: formData.proprietorName.trim(),
+        phone: formData.phone.trim(),
+        state: formData.state,
+        city: formData.city,
+        area: formData.area,
+        route: formData.area,
+        rate_offset: parseFloat(formData.rateOffset) || 0,
+        location_lat: formData.location?.lat || null,
+        location_lng: formData.location?.lng || null,
+        created_at: new Date().toISOString(),
+        unique_id: `CV-${nextVal}`,
+        outstanding_balance: 0,
+        outstanding_crates: 0
+      };
+
+      const { error: insertError } = await supabase
+        .from('wholesale_customers')
+        .insert(payload);
+      if (insertError) throw insertError;
 
       setShowSuccess(true);
       setTimeout(() => {
@@ -436,7 +461,11 @@ export default function WholesaleCustomers() {
   const handleDelete = async (id) => {
     if (window.confirm("Are you sure you want to delete this customer?")) {
       try {
-        await deleteDoc(doc(db, 'wholesale_customers', id));
+        const { error } = await supabase
+          .from('wholesale_customers')
+          .delete()
+          .eq('id', id);
+        if (error) throw error;
       } catch (err) {
         console.error("Error deleting customer:", err);
       }

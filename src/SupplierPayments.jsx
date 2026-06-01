@@ -1,7 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Search, Save, CheckCircle2, Factory, Loader2, Calendar, FileText, Banknote, Building2, CreditCard } from 'lucide-react';
-import { db } from './firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { supabase } from './supabase';
 
 const initialSuppliers = [
   { id: 1, name: 'Suguna Foods (Pune)' },
@@ -71,19 +70,20 @@ export default function SupplierPayments() {
       const supplierName = suppliers.find(s => s.id === formData.supplierId)?.name || 'Unknown';
       
       const paymentData = {
-        supplierId: formData.supplierId,
-        supplierName: supplierName,
-        paymentDate: formData.date,
+        supplier_id: String(formData.supplierId),
+        supplier_name: supplierName,
+        payment_date: formData.date,
         amount: parseFloat(formData.amount),
-        paymentMode: formData.paymentMode,
-        purchaseType: formData.purchaseType,
-        referenceNo: needsBankDetails ? formData.referenceNo : null,
-        bankName: needsBankDetails ? formData.bankName : null,
+        payment_method: formData.paymentMode,
+        purchase_type: formData.purchaseType,
+        reference_no: needsBankDetails ? formData.referenceNo : null,
+        bank_name: needsBankDetails ? formData.bankName : null,
         notes: formData.notes,
-        timestamp: serverTimestamp()
+        created_at: new Date().toISOString()
       };
 
-      await addDoc(collection(db, "supplier_payments"), paymentData);
+      const { error } = await supabase.from("supplier_payments").insert(paymentData);
+      if (error) throw error;
       
       setShowSuccess(true);
       

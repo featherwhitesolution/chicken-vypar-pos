@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db } from './firebase';
-import { collection, onSnapshot, query, orderBy, limit, doc, setDoc, getDoc, addDoc } from 'firebase/firestore';
+import { supabase } from './supabase';
 import { DollarSign, Archive, UserCheck, TrendingUp, FileText, Compass, AlertTriangle, Sparkles, Map, IndianRupee, Save, RotateCcw, Loader2, Tag, Skull, Activity, PieChart as PieChartIcon } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 
@@ -23,56 +22,143 @@ export default function WholesaleDashboard({ products = [] }) {
 
   // Fetch customers
   useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, 'wholesale_customers'), (snapshot) => {
-      const list = [];
-      snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
-      setCustomers(list);
-    });
-    return unsubscribe;
+    const fetchCustomers = async () => {
+      const { data, error } = await supabase
+        .from('wholesale_customers')
+        .select('*');
+      if (!error && data) {
+        const list = data.map(row => ({
+          id: row.id,
+          shopName: row.shop_name,
+          proprietorName: row.proprietor_name,
+          uniqueId: row.unique_id,
+          route: row.route,
+          area: row.area,
+          location: row.location_lat && row.location_lng ? { lat: row.location_lat, lng: row.location_lng } : null,
+          outstandingBalance: row.outstanding_balance,
+          outstandingCrates: row.outstanding_crates,
+          createdAt: row.created_at
+        }));
+        setCustomers(list);
+      }
+    };
+    fetchCustomers();
+
+    const channel = supabase
+      .channel('wholesale-customers-dashboard')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wholesale_customers' }, () => {
+        fetchCustomers();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   // Fetch recent invoices
   useEffect(() => {
-    const q = query(collection(db, 'wholesale_invoices'), orderBy('timestamp', 'desc'), limit(15));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = [];
-      snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
-      setInvoices(list);
-    });
-    return unsubscribe;
+    const fetchInvoices = async () => {
+      const { data, error } = await supabase
+        .from('wholesale_invoices')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(15);
+      if (!error && data) {
+        const list = data.map(row => ({
+          id: row.id,
+          customerId: row.customer_id,
+          customerName: row.customer_name,
+          totalValue: row.amount,
+          invoiceDate: row.created_at ? row.created_at.split('T')[0] : '',
+          timestamp: row.created_at,
+          invoiceId: row.invoice_id,
+          items: typeof row.items === 'string' ? JSON.parse(row.items) : (row.items || [])
+        }));
+        setInvoices(list);
+      }
+    };
+    fetchInvoices();
+
+    const channel = supabase
+      .channel('wholesale-invoices-dashboard')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wholesale_invoices' }, () => {
+        fetchInvoices();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   // Fetch today's truck dispatches for carry-over banner
   useEffect(() => {
-    const q = query(collection(db, 'truck_dispatches'), orderBy('dispatchDate', 'desc'), limit(30));
-    const unsub = onSnapshot(q, (snap) => {
-      const list = [];
-      snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-      setDispatches(list);
-    });
-    return unsub;
+    const fetchDispatches = async () => {
+      const { data, error } = await supabase
+        .from('truck_dispatches')
+        .select('*')
+        .order('dispatch_date', { ascending: false })
+        .limit(30);
+      if (!error && data) {
+        const list = data.map(row => ({
+          id: row.id,
+          truckNumber: row.truck_number,
+          driverName: row.driver_name,
+          driverPhone: row.driver_phone,
+          dispatchDate: row.dispatch_date,
+          totalBirds: row.total_birds,
+          totalWeightKg: row.total_weight_kg,
+          ratePerKg: row.rate_per_kg,
+          status: row.status,
+          remainingWeightKg: row.remaining_weight_kg,
+          carryOverDate: row.carry_over_date,
+          createdAt: row.created_at
+        }));
+        setDispatches(list);
+      }
+    };
+    fetchDispatches();
+
+    const channel = supabase
+      .channel('truck-dispatches-dashboard')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'truck_dispatches' }, () => {
+        fetchDispatches();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
-  // Load today's wholesale rates from Firestore
+  // Load today's wholesale rates from Supabase
   useEffect(() => {
-    getDoc(doc(db, 'wholesale_rates', todayStr)).then(snap => {
-      if (snap.exists()) {
-        const data = snap.data();
-        setRates({ chickenRate: data.chickenRate || '', eggsRate: data.eggsRate || '' });
-      }
-    });
+    supabase
+      .from('wholesale_rates')
+      .select('*')
+      .eq('date', todayStr)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!error && data) {
+          setRates({ chickenRate: data.chicken_rate || '', eggsRate: data.eggs_rate || '' });
+        }
+      });
   }, []);
 
   const handleSaveRates = async () => {
     if (!rates.chickenRate) { alert('Please enter chicken rate.'); return; }
     setIsSavingRate(true);
     try {
-      await setDoc(doc(db, 'wholesale_rates', todayStr), {
-        date: todayStr,
-        chickenRate: parseFloat(rates.chickenRate) || 0,
-        eggsRate: parseFloat(rates.eggsRate) || 0,
-        updatedAt: new Date().toISOString(),
-      });
+      const { error } = await supabase
+        .from('wholesale_rates')
+        .upsert({
+          date: todayStr,
+          chicken_rate: parseFloat(rates.chickenRate) || 0,
+          eggs_rate: parseFloat(rates.eggsRate) || 0,
+          updated_at: new Date().toISOString()
+        });
+      if (error) throw error;
       setRateSaved(true);
       setTimeout(() => setRateSaved(false), 3000);
     } catch (e) {
@@ -91,14 +177,17 @@ export default function WholesaleDashboard({ products = [] }) {
     }
     setIsSavingMortality(true);
     try {
-      await addDoc(collection(db, 'wholesale_mortality'), {
-        date: mortalityForm.date,
-        weightKg: parseFloat(mortalityForm.weightKg),
-        count: parseInt(mortalityForm.count),
-        notes: mortalityForm.notes.trim(),
-        source: 'shop_floor',
-        timestamp: new Date().toISOString()
-      });
+      const { error } = await supabase
+        .from('wholesale_mortality')
+        .insert({
+          date: mortalityForm.date,
+          weight_kg: parseFloat(mortalityForm.weightKg),
+          count: parseInt(mortalityForm.count),
+          notes: mortalityForm.notes.trim(),
+          source: 'shop_floor',
+          created_at: new Date().toISOString()
+        });
+      if (error) throw error;
       setShowMortalityModal(false);
       setMortalityForm({ date: todayStr, weightKg: '', count: '', notes: '' });
     } catch (err) {

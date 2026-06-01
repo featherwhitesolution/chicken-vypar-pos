@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { db } from './firebase';
-import { collection, onSnapshot, addDoc, doc, updateDoc, increment, getDoc } from 'firebase/firestore';
+import { supabase } from './supabase';
 import { ShoppingCart, Search, Plus, Trash2, Printer, CreditCard, Banknote, CheckCircle2, User, Loader2, IndianRupee, Scale, Archive, Truck, Tag, AlertCircle } from 'lucide-react';
+
 
 export default function WholesalePOS({ products = [] }) {
   const [customers, setCustomers] = useState([]);
@@ -44,38 +44,101 @@ export default function WholesalePOS({ products = [] }) {
 
   // Fetch customers
   useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, 'wholesale_customers'), (snapshot) => {
-      const list = [];
-      snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
-      setCustomers(list);
-    });
-    return unsubscribe;
+    const fetchCustomers = async () => {
+      const { data, error } = await supabase
+        .from('wholesale_customers')
+        .select('*');
+      if (!error && data) {
+        const list = data.map(row => ({
+          id: row.id,
+          shopName: row.shop_name,
+          proprietorName: row.proprietor_name,
+          phone: row.phone,
+          state: row.state,
+          city: row.city,
+          area: row.area,
+          route: row.route,
+          rateOffset: Number(row.rate_offset),
+          location: row.location_lat && row.location_lng ? { lat: row.location_lat, lng: row.location_lng } : null,
+          createdAt: row.created_at,
+          uniqueId: row.unique_id,
+          outstandingBalance: row.outstanding_balance || 0,
+          outstandingCrates: row.outstanding_crates || 0
+        }));
+        setCustomers(list);
+      }
+    };
+    fetchCustomers();
+
+    const channel = supabase
+      .channel('wholesale-customers-pos')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wholesale_customers' }, () => {
+        fetchCustomers();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   // Load today's daily wholesale rate
   useEffect(() => {
-    getDoc(doc(db, 'wholesale_rates', todayStr)).then(snap => {
-      if (snap.exists()) {
-        const data = snap.data();
-        setDailyRates({ chickenRate: data.chickenRate, eggsRate: data.eggsRate });
-      }
-      setRatesLoaded(true);
-    });
+    supabase
+      .from('wholesale_rates')
+      .select('*')
+      .eq('date', todayStr)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!error && data) {
+          setDailyRates({ chickenRate: data.chicken_rate, eggsRate: data.eggs_rate });
+        }
+        setRatesLoaded(true);
+      });
   }, []);
 
   // Fetch active truck dispatches for linking
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'truck_dispatches'), (snap) => {
-      const list = [];
-      snap.forEach(d => {
-        const data = { id: d.id, ...d.data() };
-        if ((data.status === 'active' || data.status === 'carryover') && data.dispatchDate === todayStr) {
-          list.push(data);
-        }
-      });
-      setActiveDispatches(list);
-    });
-    return unsub;
+    const fetchDispatches = async () => {
+      const { data, error } = await supabase
+        .from('truck_dispatches')
+        .select('*')
+        .eq('dispatch_date', todayStr);
+      if (!error && data) {
+        const list = [];
+        data.forEach(row => {
+          if (row.status === 'active' || row.status === 'carryover') {
+            list.push({
+              id: row.id,
+              truckNumber: row.truck_number,
+              driverName: row.driver_name,
+              driverPhone: row.driver_phone,
+              dispatchDate: row.dispatch_date,
+              totalBirds: row.total_birds,
+              totalWeightKg: row.total_weight_kg,
+              ratePerKg: row.rate_per_kg,
+              status: row.status,
+              remainingWeightKg: row.remaining_weight_kg,
+              carryOverDate: row.carry_over_date,
+              createdAt: row.created_at
+            });
+          }
+        });
+        setActiveDispatches(list);
+      }
+    };
+    fetchDispatches();
+
+    const channel = supabase
+      .channel('truck-dispatches-pos')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'truck_dispatches' }, () => {
+        fetchDispatches();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   // Base rates: daily rate first, fallback to product rate
@@ -184,12 +247,65 @@ export default function WholesalePOS({ products = [] }) {
 
     setIsSaving(true);
     try {
-       
       const invoiceNo = "WINV-" + Math.floor(100000 + Math.random() * 900000);
       const invoiceDate = new Date().toISOString().split('T')[0];
       const timestamp = new Date().toISOString();
 
       const invoicePayload = {
+        invoice_id: invoiceNo,
+        customer_id: selectedCustomer.id,
+        customer_name: selectedCustomer.shopName,
+        route: selectedCustomer.route,
+        truck_dispatch_id: selectedTruckId || null,
+        truck_number: selectedTruckId ? (activeDispatches.find(d => d.id === selectedTruckId)?.truckNumber || '') : '',
+        invoice_date: invoiceDate,
+        items: JSON.stringify(cart),
+        amount: cartTotal,
+        crates_issued: parseInt(cratesIssued) || 0,
+        crates_returned: parseInt(cratesReturned) || 0,
+        crates_net_outstanding: (parseInt(cratesIssued) || 0) - (parseInt(cratesReturned) || 0),
+        payment_status: isCredit ? "Pending (Credit)" : "Paid",
+        payment_method: isCredit ? "Credit" : paymentType,
+        created_at: timestamp
+      };
+
+      // 1. Add to Invoices collection
+      const { error: invoiceError } = await supabase
+        .from('wholesale_invoices')
+        .insert(invoicePayload);
+      if (invoiceError) throw invoiceError;
+
+      // 2. Add Crates Log if cages are moved
+      const netCrates = (parseInt(cratesIssued) || 0) - (parseInt(cratesReturned) || 0);
+      if (cratesIssued > 0 || cratesReturned > 0) {
+        const { error: ledgerError } = await supabase
+          .from('crates_ledger')
+          .insert({
+            customer_id: selectedCustomer.id,
+            customer_name: selectedCustomer.shopName,
+            action_type: netCrates >= 0 ? 'issue' : 'return',
+            quantity: Math.abs(netCrates),
+            notes: invoiceNo,
+            created_at: timestamp
+          });
+        if (ledgerError) throw ledgerError;
+      }
+
+      // 3. Update customer outstanding balance and cages count
+      const updatedOutstandingCrates = (selectedCustomer.outstandingCrates || 0) + netCrates;
+      const updatedOutstandingBalance = (selectedCustomer.outstandingBalance || 0) + (isCredit ? cartTotal : 0);
+
+      const { error: customerError } = await supabase
+        .from('wholesale_customers')
+        .update({
+          outstanding_crates: updatedOutstandingCrates,
+          outstanding_balance: updatedOutstandingBalance
+        })
+        .eq('id', selectedCustomer.id);
+      if (customerError) throw customerError;
+
+      // Adapt formatting for printing layout
+      const printPayload = {
         invoiceId: invoiceNo,
         customerId: selectedCustomer.id,
         customerName: selectedCustomer.shopName,
@@ -201,38 +317,13 @@ export default function WholesalePOS({ products = [] }) {
         totalValue: cartTotal,
         cratesIssued: parseInt(cratesIssued) || 0,
         cratesReturned: parseInt(cratesReturned) || 0,
-        cratesNetOutstanding: (parseInt(cratesIssued) || 0) - (parseInt(cratesReturned) || 0),
+        cratesNetOutstanding: netCrates,
         paymentStatus: isCredit ? "Pending (Credit)" : "Paid",
         paymentMethod: isCredit ? "Credit" : paymentType,
         timestamp
       };
 
-      // 1. Add to Invoices collection
-      await addDoc(collection(db, 'wholesale_invoices'), invoicePayload);
-
-      // 2. Add Crates Log if cages are moved
-      const netCrates = (parseInt(cratesIssued) || 0) - (parseInt(cratesReturned) || 0);
-      if (cratesIssued > 0 || cratesReturned > 0) {
-        await addDoc(collection(db, 'crates_ledger'), {
-          customerId: selectedCustomer.id,
-          customerName: selectedCustomer.shopName,
-          date: invoiceDate,
-          cratesIssued: parseInt(cratesIssued) || 0,
-          cratesReturned: parseInt(cratesReturned) || 0,
-          netOutstanding: netCrates,
-          invoiceId: invoiceNo,
-          timestamp
-        });
-      }
-
-      // 3. Atomically update wholesale_customers balance and cages count
-      const customerRef = doc(db, 'wholesale_customers', selectedCustomer.id);
-      await updateDoc(customerRef, {
-        outstandingCrates: increment(netCrates),
-        outstandingBalance: increment(isCredit ? cartTotal : 0)
-      });
-
-      setSavedInvoice(invoicePayload);
+      setSavedInvoice(printPayload);
       setShowPrintModal(true);
       
       // Reset POS Cart

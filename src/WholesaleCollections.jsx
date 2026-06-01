@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { db } from './firebase';
-import { collection, onSnapshot, addDoc, doc, updateDoc, increment, query, where, getDocs } from 'firebase/firestore';
+import { supabase } from './supabase';
+
 import { DollarSign, Search, Navigation, Phone, CheckCircle2, Loader2, X, ClipboardList, Send, MapPin } from 'lucide-react';
 
 export default function WholesaleCollections() {
@@ -22,19 +22,48 @@ export default function WholesaleCollections() {
 
   // Fetch customers
   useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, 'wholesale_customers'), (snapshot) => {
-      const list = [];
-      const distinctRoutes = new Set();
-      snapshot.forEach(doc => {
-        const data = doc.data();
-        list.push({ id: doc.id, ...data });
-        if (data.route) distinctRoutes.add(data.route);
-      });
-      // Sort routes and set
-      setRoutes(Array.from(distinctRoutes).sort());
-      setCustomers(list);
-    });
-    return unsubscribe;
+    const fetchCustomers = async () => {
+      const { data, error } = await supabase
+        .from('wholesale_customers')
+        .select('*');
+      if (!error && data) {
+        const list = [];
+        const distinctRoutes = new Set();
+        data.forEach(row => {
+          list.push({
+            id: row.id,
+            shopName: row.shop_name,
+            proprietorName: row.proprietor_name,
+            phone: row.phone,
+            state: row.state,
+            city: row.city,
+            area: row.area,
+            route: row.route,
+            rateOffset: Number(row.rate_offset),
+            location: row.location_lat && row.location_lng ? { lat: row.location_lat, lng: row.location_lng } : null,
+            createdAt: row.created_at,
+            uniqueId: row.unique_id,
+            outstandingBalance: row.outstanding_balance || 0,
+            outstandingCrates: row.outstanding_crates || 0
+          });
+          if (row.route) distinctRoutes.add(row.route);
+        });
+        setRoutes(Array.from(distinctRoutes).sort());
+        setCustomers(list);
+      }
+    };
+    fetchCustomers();
+
+    const channel = supabase
+      .channel('wholesale-customers-collections')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wholesale_customers' }, () => {
+        fetchCustomers();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const handleOpenPaymentModal = (cust) => {
@@ -62,21 +91,30 @@ export default function WholesaleCollections() {
       const timestamp = new Date().toISOString();
 
       // 1. Add record to wholesale_payments
-      await addDoc(collection(db, 'wholesale_payments'), {
-        customerId: paymentForm.customerId,
-        customerName: paymentForm.customerName,
-        amount: payAmt,
-        paymentMethod: paymentForm.paymentMethod,
-        notes: paymentForm.notes.trim() || 'Weekly collection settlement',
-        date: dateStr,
-        timestamp
-      });
+      const { error: paymentError } = await supabase
+        .from('wholesale_payments')
+        .insert({
+          customer_id: paymentForm.customerId,
+          customer_name: paymentForm.customerName,
+          amount: payAmt,
+          payment_method: paymentForm.paymentMethod,
+          notes: paymentForm.notes.trim() || 'Weekly collection settlement',
+          payment_date: dateStr,
+          created_at: timestamp
+        });
+      if (paymentError) throw paymentError;
 
       // 2. Subtract from customer outstandingBalance
-      const customerRef = doc(db, 'wholesale_customers', paymentForm.customerId);
-      await updateDoc(customerRef, {
-        outstandingBalance: increment(-payAmt)
-      });
+      const customer = customers.find(c => c.id === paymentForm.customerId);
+      const updatedBalance = (customer ? customer.outstandingBalance : 0) - payAmt;
+
+      const { error: customerError } = await supabase
+        .from('wholesale_customers')
+        .update({
+          outstanding_balance: updatedBalance
+        })
+        .eq('id', paymentForm.customerId);
+      if (customerError) throw customerError;
 
       setShowPaymentModal(false);
       alert("Payment collection logged successfully.");

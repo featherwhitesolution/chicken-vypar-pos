@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FileText, Download, Printer, User, Filter, AlertCircle, IndianRupee, Package, Box, Truck, BarChart2 } from 'lucide-react';
-import { db } from './firebase';
-import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
+import { supabase } from './supabase';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import ExcelJS from 'exceljs';
@@ -39,69 +38,162 @@ export default function WholesaleReports() {
 
   // Fetch Data
   useEffect(() => {
-    // Customers
-    const unsubCust = onSnapshot(collection(db, 'wholesale_customers'), (snapshot) => {
-      const list = [];
-      snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
-      setCustomers(list);
-    });
+    const fetchAllData = async () => {
+      // 1. Customers
+      const { data: custData } = await supabase.from('wholesale_customers').select('*');
+      if (custData) {
+        setCustomers(custData.map(row => ({
+          id: row.id,
+          shopName: row.shop_name,
+          proprietorName: row.proprietor_name,
+          phone: row.phone,
+          state: row.state,
+          city: row.city,
+          area: row.area,
+          route: row.route,
+          rateOffset: Number(row.rate_offset),
+          location: row.location_lat && row.location_lng ? { lat: row.location_lat, lng: row.location_lng } : null,
+          createdAt: row.created_at,
+          uniqueId: row.unique_id,
+          outstandingBalance: Number(row.outstanding_balance) || 0,
+          outstandingCrates: Number(row.outstanding_crates) || 0
+        })));
+      }
 
-    // Invoices (Sales)
-    const qInvoices = query(collection(db, 'wholesale_invoices'), orderBy('timestamp', 'desc'));
-    const unsubInv = onSnapshot(qInvoices, (snapshot) => {
-      const list = [];
-      snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
-      setInvoices(list);
-    });
+      // 2. Invoices
+      const { data: invData } = await supabase.from('wholesale_invoices').select('*').order('created_at', { ascending: false });
+      if (invData) {
+        setInvoices(invData.map(row => ({
+          id: row.id,
+          customerId: row.customer_id,
+          customerName: row.customer_name,
+          totalValue: Number(row.amount),
+          invoiceDate: row.created_at ? row.created_at.split('T')[0] : '',
+          timestamp: row.created_at,
+          invoiceId: row.invoice_id,
+          items: typeof row.items === 'string' ? JSON.parse(row.items) : (row.items || [])
+        })));
+      }
 
-    // Collections (Payments Received)
-    const qColl = query(collection(db, 'wholesale_collections'), orderBy('timestamp', 'desc'));
-    const unsubColl = onSnapshot(qColl, (snapshot) => {
-      const list = [];
-      snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
-      setCollections(list);
-    });
+      // 3. Collections (Payments)
+      const { data: collData } = await supabase.from('wholesale_payments').select('*').order('created_at', { ascending: false });
+      if (collData) {
+        setCollections(collData.map(row => ({
+          id: row.id,
+          customerId: row.customer_id,
+          customerName: row.customer_name,
+          amount: Number(row.amount),
+          paymentMethod: row.payment_method,
+          date: row.payment_date,
+          notes: row.notes,
+          timestamp: row.created_at
+        })));
+      }
 
-    // Farm Inwards (Procurement)
-    const qFarm = query(collection(db, 'farm_inwards'), orderBy('date', 'desc'));
-    const unsubFarm = onSnapshot(qFarm, (snapshot) => {
-      const list = [];
-      snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
-      setFarmInwards(list);
-    });
+      // 4. Farm Inwards
+      const { data: farmData } = await supabase.from('farm_inwards').select('*').order('date', { ascending: false });
+      if (farmData) {
+        setFarmInwards(farmData.map(row => ({
+          id: row.id,
+          farmName: row.farm_name,
+          vehicleNo: row.vehicle_no,
+          driverName: row.driver_name,
+          farmWeightLoaded: Number(row.farm_weight_loaded),
+          birdsLoaded: Number(row.birds_loaded),
+          grossWeight: Number(row.gross_weight),
+          tareWeight: Number(row.tare_weight),
+          netWeight: Number(row.net_weight),
+          sellableWeight: Number(row.sellable_weight),
+          birdsReceived: Number(row.birds_received),
+          deadBirdsWeight: Number(row.dead_birds_weight),
+          transitWeightLoss: Number(row.transit_weight_loss),
+          transitWeightLossPercent: Number(row.transit_weight_loss_percent),
+          transitMortality: Number(row.transit_mortality),
+          rate: Number(row.rate),
+          totalValue: Number(row.total_value),
+          notes: row.notes,
+          date: row.date,
+          timestamp: row.timestamp
+        })));
+      }
 
-    // Truck Dispatches
-    const qTruck = query(collection(db, 'truck_dispatches'), orderBy('dispatchDate', 'desc'));
-    const unsubTruck = onSnapshot(qTruck, (snapshot) => {
-      const list = [];
-      snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
-      setTruckDispatches(list);
-    });
+      // 5. Truck Dispatches
+      const { data: truckData } = await supabase.from('truck_dispatches').select('*').order('dispatch_date', { ascending: false });
+      if (truckData) {
+        setTruckDispatches(truckData.map(row => ({
+          id: row.id,
+          truckNumber: row.truck_number,
+          driverName: row.driver_name,
+          driverPhone: row.driver_phone,
+          dispatchDate: row.dispatch_date,
+          totalBirds: row.total_birds,
+          totalWeightKg: Number(row.total_weight_kg),
+          soldWeightKg: Number(row.sold_weight_kg),
+          deadBirdsWeightKg: Number(row.dead_birds_weight_kg),
+          deadBirdsCount: row.dead_birds_count,
+          remainingWeightKg: Number(row.remaining_weight_kg),
+          ratePerKg: Number(row.rate_per_kg),
+          status: row.status,
+          notes: row.notes,
+          isCarryOver: row.is_carry_over,
+          dieselExpense: Number(row.diesel_expense),
+          driverBhatta: Number(row.driver_bhatta),
+          tollExpense: Number(row.toll_expense),
+          otherExpenses: Number(row.other_expenses),
+          carryOverDate: row.carry_over_date,
+          resolvedAt: row.resolved_at,
+          updatedAt: row.updated_at,
+          createdAt: row.created_at
+        })));
+      }
 
-    // Mortality Logs
-    const qMort = query(collection(db, 'wholesale_mortality'), orderBy('date', 'desc'));
-    const unsubMort = onSnapshot(qMort, (snapshot) => {
-      const list = [];
-      snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
-      setMortalityLogs(list);
-    });
+      // 6. Mortality
+      const { data: mortData } = await supabase.from('wholesale_mortality').select('*').order('date', { ascending: false });
+      if (mortData) {
+        setMortalityLogs(mortData.map(row => ({
+          id: row.id,
+          date: row.date,
+          weightKg: Number(row.weight_kg),
+          count: Number(row.count),
+          notes: row.notes,
+          source: row.source,
+          createdAt: row.created_at
+        })));
+      }
 
-    // Crates Ledger
-    const qCrates = query(collection(db, 'crates_ledger'), orderBy('timestamp', 'desc'));
-    const unsubCrates = onSnapshot(qCrates, (snapshot) => {
-      const list = [];
-      snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
-      setCratesLedger(list);
-    });
+      // 7. Crates Ledger
+      const { data: cratesData } = await supabase.from('crates_ledger').select('*').order('created_at', { ascending: false });
+      if (cratesData) {
+        setCratesLedger(cratesData.map(row => ({
+          id: row.id,
+          customerId: row.customer_id,
+          customerName: row.customer_name,
+          date: row.created_at ? row.created_at.split('T')[0] : '',
+          cratesIssued: row.action_type === 'issue' ? row.quantity : 0,
+          cratesReturned: row.action_type === 'return' ? row.quantity : 0,
+          netOutstanding: row.action_type === 'issue' ? row.quantity : -row.quantity,
+          invoiceId: row.notes || '',
+          timestamp: row.created_at
+        })));
+      }
+    };
+
+    fetchAllData();
+
+    // Subscribe to changes on any of these tables to refresh
+    const channel = supabase
+      .channel('wholesale-reports-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wholesale_customers' }, fetchAllData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wholesale_invoices' }, fetchAllData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wholesale_payments' }, fetchAllData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'farm_inwards' }, fetchAllData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'truck_dispatches' }, fetchAllData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wholesale_mortality' }, fetchAllData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'crates_ledger' }, fetchAllData)
+      .subscribe();
 
     return () => {
-      unsubCust();
-      unsubInv();
-      unsubColl();
-      unsubFarm();
-      unsubTruck();
-      unsubMort();
-      unsubCrates();
+      supabase.removeChannel(channel);
     };
   }, []);
 

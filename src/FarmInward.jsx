@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Truck, Scale, AlertTriangle, Save, CheckCircle2, History, Loader2, DollarSign, RefreshCw, Layers } from 'lucide-react';
-import { db } from './firebase';
-import { collection, addDoc, onSnapshot, query, orderBy, limit } from 'firebase/firestore';
+import { supabase } from './supabase';
 
 export default function FarmInward() {
   const [inwards, setInwards] = useState([]);
@@ -24,13 +23,50 @@ export default function FarmInward() {
 
   // Fetch recent farm inwards
   useEffect(() => {
-    const q = query(collection(db, 'farm_inwards'), orderBy('date', 'desc'), limit(10));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = [];
-      snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
-      setInwards(data);
-    });
-    return unsubscribe;
+    const fetchRecent = async () => {
+      const { data, error } = await supabase
+        .from('farm_inwards')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(10);
+      if (!error && data) {
+        const mapped = data.map(row => ({
+          id: row.id,
+          farmName: row.farm_name,
+          vehicleNo: row.vehicle_no,
+          driverName: row.driver_name,
+          farmWeightLoaded: Number(row.farm_weight_loaded),
+          birdsLoaded: Number(row.birds_loaded),
+          grossWeight: Number(row.gross_weight),
+          tareWeight: Number(row.tare_weight),
+          netWeight: Number(row.net_weight),
+          sellableWeight: Number(row.sellable_weight),
+          birdsReceived: Number(row.birds_received),
+          deadBirdsWeight: Number(row.dead_birds_weight),
+          transitWeightLoss: Number(row.transit_weight_loss),
+          transitWeightLossPercent: Number(row.transit_weight_loss_percent),
+          transitMortality: Number(row.transit_mortality),
+          rate: Number(row.rate),
+          totalValue: Number(row.total_value),
+          notes: row.notes,
+          date: row.date,
+          timestamp: row.timestamp
+        }));
+        setInwards(mapped);
+      }
+    };
+    fetchRecent();
+
+    const channel = supabase
+      .channel('farm-inwards-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'farm_inwards' }, () => {
+        fetchRecent();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   // Dynamic calculations
@@ -60,28 +96,30 @@ export default function FarmInward() {
     setIsSaving(true);
     try {
       const payload = {
-        farmName: formData.farmName.trim(),
-        vehicleNo: formData.vehicleNo.trim().toUpperCase(),
-        driverName: formData.driverName.trim(),
-        farmWeightLoaded: farmWeight,
-        birdsLoaded: loadedCount,
-        grossWeight: gross,
-        tareWeight: tare,
-        netWeight: netReceivedWeight,
-        sellableWeight: sellableWeight,
-        birdsReceived: receivedCount,
-        deadBirdsWeight: deadWeight,
-        transitWeightLoss: transitWeightLoss,
-        transitWeightLossPercent: parseFloat(transitWeightLossPercent),
-        transitMortality: transitMortality,
+        farm_name: formData.farmName.trim(),
+        vehicle_no: formData.vehicleNo.trim().toUpperCase(),
+        driver_name: formData.driverName.trim(),
+        farm_weight_loaded: farmWeight,
+        birds_loaded: loadedCount,
+        gross_weight: gross,
+        tare_weight: tare,
+        net_weight: netReceivedWeight,
+        sellable_weight: sellableWeight,
+        birds_received: receivedCount,
+        dead_birds_weight: deadWeight,
+        transit_weight_loss: transitWeightLoss,
+        transit_weight_loss_percent: parseFloat(transitWeightLossPercent),
+        transit_mortality: transitMortality,
         rate: rateVal,
-        totalValue: totalBillValue,
+        total_value: totalBillValue,
         notes: formData.notes.trim(),
         date: new Date().toISOString().split('T')[0],
         timestamp: new Date().toISOString()
       };
 
-      await addDoc(collection(db, 'farm_inwards'), payload);
+      const { error } = await supabase.from('farm_inwards').insert(payload);
+      if (error) throw error;
+
       setShowSuccess(true);
       setTimeout(() => {
         setShowSuccess(false);

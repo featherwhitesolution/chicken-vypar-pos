@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db } from './firebase';
-import { collection, onSnapshot, addDoc, doc, updateDoc, increment, query, orderBy, limit } from 'firebase/firestore';
+import { supabase } from './supabase';
 import { Archive, Plus, Minus, History, Search, Loader2, Save, AlertCircle, Sparkles } from 'lucide-react';
 
 export default function CrateLedger() {
@@ -18,25 +17,77 @@ export default function CrateLedger() {
 
   // Fetch B2B customer crate states
   useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, 'wholesale_customers'), (snapshot) => {
-      const list = [];
-      snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
-      // Sort by outstanding crates descending
-      list.sort((a, b) => (b.outstandingCrates || 0) - (a.outstandingCrates || 0));
-      setCustomers(list);
-    });
-    return unsubscribe;
+    const fetchCustomers = async () => {
+      const { data, error } = await supabase
+        .from('wholesale_customers')
+        .select('*');
+      if (!error && data) {
+        const list = data.map(row => ({
+          id: row.id,
+          shopName: row.shop_name,
+          proprietorName: row.proprietor_name,
+          uniqueId: row.unique_id,
+          route: row.route,
+          area: row.area,
+          location: row.location_lat && row.location_lng ? { lat: row.location_lat, lng: row.location_lng } : null,
+          outstandingBalance: row.outstanding_balance,
+          outstandingCrates: row.outstanding_crates || 0,
+          createdAt: row.created_at
+        }));
+        // Sort by outstanding crates descending
+        list.sort((a, b) => (b.outstandingCrates || 0) - (a.outstandingCrates || 0));
+        setCustomers(list);
+      }
+    };
+    fetchCustomers();
+
+    const channel = supabase
+      .channel('wholesale-customers-crate-ledger')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wholesale_customers' }, () => {
+        fetchCustomers();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   // Fetch recent transactions
   useEffect(() => {
-    const q = query(collection(db, 'crates_ledger'), orderBy('timestamp', 'desc'), limit(30));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = [];
-      snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
-      setTransactions(list);
-    });
-    return unsubscribe;
+    const fetchTransactions = async () => {
+      const { data, error } = await supabase
+        .from('crates_ledger')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(30);
+      if (!error && data) {
+        const list = data.map(row => ({
+          id: row.id,
+          customerId: row.customer_id,
+          customerName: row.customer_name,
+          date: row.created_at ? row.created_at.split('T')[0] : '',
+          cratesIssued: row.action_type === 'issue' ? row.quantity : 0,
+          cratesReturned: row.action_type === 'return' ? row.quantity : 0,
+          netOutstanding: row.action_type === 'issue' ? row.quantity : -row.quantity,
+          invoiceId: row.notes || '',
+          timestamp: row.created_at
+        }));
+        setTransactions(list);
+      }
+    };
+    fetchTransactions();
+
+    const channel = supabase
+      .channel('crates-ledger-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'crates_ledger' }, () => {
+        fetchTransactions();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const handleAdjustmentSubmit = async (e) => {
@@ -56,29 +107,29 @@ export default function CrateLedger() {
       const customer = customers.find(c => c.id === selectedCustId);
       const isReturn = actionType === 'return';
       
-      const issued = isReturn ? 0 : count;
-      const returned = isReturn ? count : 0;
-      const net = issued - returned;
-      const dateStr = new Date().toISOString().split('T')[0];
-      const timestamp = new Date().toISOString();
+      const newOutstanding = (customer.outstandingCrates || 0) + (isReturn ? -count : count);
 
       // 1. Log transaction to crates_ledger
-      await addDoc(collection(db, 'crates_ledger'), {
-        customerId: customer.id,
-        customerName: customer.shopName,
-        date: dateStr,
-        cratesIssued: issued,
-        cratesReturned: returned,
-        netOutstanding: net,
-        invoiceId: notes.trim() || 'Manual adjustment',
-        timestamp
-      });
+      const { error: ledgerError } = await supabase
+        .from('crates_ledger')
+        .insert({
+          customer_id: customer.id,
+          customer_name: customer.shopName,
+          action_type: actionType,
+          quantity: count,
+          notes: notes.trim() || 'Manual adjustment',
+          created_at: new Date().toISOString()
+        });
+      if (ledgerError) throw ledgerError;
 
       // 2. Update wholesale_customers
-      const customerRef = doc(db, 'wholesale_customers', customer.id);
-      await updateDoc(customerRef, {
-        outstandingCrates: increment(net)
-      });
+      const { error: customerError } = await supabase
+        .from('wholesale_customers')
+        .update({
+          outstanding_crates: newOutstanding
+        })
+        .eq('id', customer.id);
+      if (customerError) throw customerError;
 
       // Reset Form
       setCratesCount('');

@@ -1,7 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Search, Plus, Save, Truck, User, IndianRupee, Tag, CheckCircle2, Factory, Scale, Loader2, Hash, Wallet, Calendar, Building2, FileText } from 'lucide-react';
-import { db } from './firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { supabase } from './supabase';
 
 const initialSuppliers = [
   { id: 1, name: 'Suguna Foods (Pune)' },
@@ -118,25 +117,26 @@ export default function StockInward() {
       const supplierName = suppliers.find(s => s.id === formData.supplierId)?.name || 'Unknown';
       
       const stockData = {
-        supplierId: formData.supplierId,
-        supplierName: supplierName,
-        vehicleNo: formData.vehicleNo,
+        supplier_id: String(formData.supplierId),
+        supplier_name: supplierName,
+        vehicle_no: formData.vehicleNo,
         rate: parseFloat(formData.rate),
         weight: parseFloat(formData.weight),
-        numberOfBirds: parseInt(formData.numberOfBirds, 10),
-        chickenType: formData.chickenType,
-        paymentMode: formData.paymentMode,
-        chequeDate: formData.paymentMode === 'Cheque' ? formData.chequeDate : null,
-        chequeNumber: formData.paymentMode === 'Cheque' ? formData.chequeNumber : null,
-        bankName: formData.paymentMode === 'Cheque' ? formData.bankName : null,
-        totalValue: parseFloat(formData.weight) * parseFloat(formData.rate),
-        timestamp: serverTimestamp()
+        number_of_birds: parseInt(formData.numberOfBirds, 10),
+        chicken_type: formData.chickenType,
+        payment_mode: formData.paymentMode,
+        cheque_date: formData.paymentMode === 'Cheque' ? formData.chequeDate : null,
+        cheque_number: formData.paymentMode === 'Cheque' ? formData.chequeNumber : null,
+        bank_name: formData.paymentMode === 'Cheque' ? formData.bankName : null,
+        total_value: parseFloat(formData.weight) * parseFloat(formData.rate),
+        created_at: new Date().toISOString()
       };
 
-      // Save to Firebase Firestore
-      await addDoc(collection(db, "stock_inwards"), stockData);
+      // Save to Supabase
+      const { error } = await supabase.from("stock_inwards").insert(stockData);
+      if (error) throw error;
       
-      console.log("Stock Inward Saved to Firebase:", stockData);
+      console.log("Stock Inward Saved to Supabase:", stockData);
       setShowSuccess(true);
       
       setTimeout(() => {
@@ -157,7 +157,7 @@ export default function StockInward() {
       }, 3000);
     } catch (error) {
       console.error("Error saving stock inward:", error);
-      alert("Failed to save data. Please make sure Firebase is configured correctly.");
+      alert("Failed to save data. Please check connection.");
     } finally {
       setIsSaving(false);
     }

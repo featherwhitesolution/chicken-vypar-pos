@@ -1,9 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { db } from './firebase';
-import {
-  collection, addDoc, onSnapshot, doc, updateDoc,
-  query, orderBy, limit
-} from 'firebase/firestore';
+import { supabase } from './supabase';
+
 import {
   Truck, Plus, Save, Loader2, CheckCircle2, AlertTriangle,
   Package, ArrowRight, Calendar, Phone, User, Hash, Scale,
@@ -48,13 +45,50 @@ export default function TruckDispatch() {
 
   // Fetch dispatches
   useEffect(() => {
-    const q = query(collection(db, 'truck_dispatches'), orderBy('dispatchDate', 'desc'), limit(50));
-    const unsub = onSnapshot(q, (snap) => {
-      const list = [];
-      snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-      setDispatches(list);
-    });
-    return unsub;
+    const fetchDispatches = async () => {
+      const { data, error } = await supabase
+        .from('truck_dispatches')
+        .select('*')
+        .order('dispatch_date', { ascending: false })
+        .limit(50);
+      if (!error && data) {
+        const list = data.map(row => ({
+          id: row.id,
+          truckNumber: row.truck_number,
+          driverName: row.driver_name,
+          driverPhone: row.driver_phone,
+          dispatchDate: row.dispatch_date,
+          totalBirds: row.total_birds,
+          totalWeightKg: Number(row.total_weight_kg),
+          soldWeightKg: Number(row.sold_weight_kg),
+          deadBirdsWeightKg: Number(row.dead_birds_weight_kg),
+          deadBirdsCount: row.dead_birds_count,
+          remainingWeightKg: Number(row.remaining_weight_kg),
+          ratePerKg: Number(row.rate_per_kg),
+          status: row.status,
+          notes: row.notes,
+          isCarryOver: row.is_carry_over,
+          dieselExpense: Number(row.diesel_expense),
+          driverBhatta: Number(row.driver_bhatta),
+          tollExpense: Number(row.toll_expense),
+          otherExpenses: Number(row.other_expenses),
+          createdAt: row.created_at
+        }));
+        setDispatches(list);
+      }
+    };
+    fetchDispatches();
+
+    const channel = supabase
+      .channel('truck-dispatches-dir')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'truck_dispatches' }, () => {
+        fetchDispatches();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const handleSubmit = async (e) => {
@@ -66,21 +100,24 @@ export default function TruckDispatch() {
     setIsSaving(true);
     try {
       const totalWeight = parseFloat(form.totalWeightKg) || 0;
-      await addDoc(collection(db, 'truck_dispatches'), {
-        truckNumber: form.truckNumber.trim().toUpperCase(),
-        driverName: form.driverName.trim(),
-        driverPhone: form.driverPhone.trim(),
-        dispatchDate: form.dispatchDate,
-        totalBirds: parseInt(form.totalBirds) || 0,
-        totalWeightKg: totalWeight,
-        soldWeightKg: 0,
-        remainingWeightKg: totalWeight,
-        ratePerKg: parseFloat(form.ratePerKg) || 0,
-        status: 'active',
-        notes: form.notes.trim(),
-        isCarryOver: false,
-        createdAt: new Date().toISOString(),
-      });
+      const { error } = await supabase
+        .from('truck_dispatches')
+        .insert({
+          truck_number: form.truckNumber.trim().toUpperCase(),
+          driver_name: form.driverName.trim(),
+          driver_phone: form.driverPhone.trim(),
+          dispatch_date: form.dispatchDate,
+          total_birds: parseInt(form.totalBirds) || 0,
+          total_weight_kg: totalWeight,
+          sold_weight_kg: 0,
+          remaining_weight_kg: totalWeight,
+          rate_per_kg: parseFloat(form.ratePerKg) || 0,
+          status: 'active',
+          notes: form.notes.trim(),
+          is_carry_over: false,
+          created_at: new Date().toISOString()
+        });
+      if (error) throw error;
       setForm({
         truckNumber: '', driverName: '', driverPhone: '',
         dispatchDate: todayStr, totalBirds: '', totalWeightKg: '',
@@ -98,13 +135,17 @@ export default function TruckDispatch() {
     if (!window.confirm(`Mark truck ${dispatch.truckNumber} as Fully Sold and returned?`)) return;
     setIsUpdating(true);
     try {
-      await updateDoc(doc(db, 'truck_dispatches', dispatch.id), {
-        status: 'sold',
-        soldWeightKg: dispatch.totalWeightKg,
-        deadBirdsWeightKg: 0,
-        remainingWeightKg: 0,
-        resolvedAt: new Date().toISOString(),
-      });
+      const { error } = await supabase
+        .from('truck_dispatches')
+        .update({
+          status: 'sold',
+          sold_weight_kg: dispatch.totalWeightKg,
+          dead_birds_weight_kg: 0,
+          remaining_weight_kg: 0,
+          resolved_at: new Date().toISOString(),
+        })
+        .eq('id', dispatch.id);
+      if (error) throw error;
     } catch (err) {
       console.error(err);
     } finally {
@@ -135,14 +176,18 @@ export default function TruckDispatch() {
     
     setIsUpdating(true);
     try {
-      await updateDoc(doc(db, 'truck_dispatches', showPartialModal.id), {
-        status: remaining > 0 ? 'partial' : 'sold',
-        soldWeightKg: newSoldKg,
-        deadBirdsWeightKg: newDeadKg,
-        deadBirdsCount: newDeadCount,
-        remainingWeightKg: remaining,
-        updatedAt: new Date().toISOString(),
-      });
+      const { error } = await supabase
+        .from('truck_dispatches')
+        .update({
+          status: remaining > 0 ? 'partial' : 'sold',
+          sold_weight_kg: newSoldKg,
+          dead_birds_weight_kg: newDeadKg,
+          dead_birds_count: newDeadCount,
+          remaining_weight_kg: remaining,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', showPartialModal.id);
+      if (error) throw error;
 
       setShowPartialModal(null);
       setPartialSoldKg('');
@@ -169,11 +214,15 @@ export default function TruckDispatch() {
 
     setIsUpdating(true);
     try {
-      await updateDoc(doc(db, 'truck_dispatches', showAdjustModal.id), {
-        soldWeightKg: showAdjustModal.soldWeightKg - additionalDeadKg,
-        deadBirdsWeightKg: (showAdjustModal.deadBirdsWeightKg || 0) + additionalDeadKg,
-        updatedAt: new Date().toISOString(),
-      });
+      const { error } = await supabase
+        .from('truck_dispatches')
+        .update({
+          sold_weight_kg: showAdjustModal.soldWeightKg - additionalDeadKg,
+          dead_birds_weight_kg: (showAdjustModal.deadBirdsWeightKg || 0) + additionalDeadKg,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', showAdjustModal.id);
+      if (error) throw error;
       setShowAdjustModal(null);
       setAdjustDeadKg('');
     } catch (err) {
@@ -187,13 +236,17 @@ export default function TruckDispatch() {
   const handleSaveExpenses = async () => {
     setIsUpdating(true);
     try {
-      await updateDoc(doc(db, 'truck_dispatches', showExpenseModal.id), {
-        dieselExpense: parseFloat(expenseForm.dieselExpense) || 0,
-        driverBhatta: parseFloat(expenseForm.driverBhatta) || 0,
-        tollExpense: parseFloat(expenseForm.tollExpense) || 0,
-        otherExpenses: parseFloat(expenseForm.otherExpenses) || 0,
-        updatedAt: new Date().toISOString()
-      });
+      const { error } = await supabase
+        .from('truck_dispatches')
+        .update({
+          diesel_expense: parseFloat(expenseForm.dieselExpense) || 0,
+          driver_bhatta: parseFloat(expenseForm.driverBhatta) || 0,
+          toll_expense: parseFloat(expenseForm.tollExpense) || 0,
+          other_expenses: parseFloat(expenseForm.otherExpenses) || 0,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', showExpenseModal.id);
+      if (error) throw error;
       setShowExpenseModal(null);
     } catch (err) {
       console.error(err);

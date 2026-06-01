@@ -1,16 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { db } from './firebase';
-import {
-  doc,
-  updateDoc,
-  onSnapshot,
-  collection,
-  addDoc,
-  increment,
-  query,
-  orderBy,
-  getDoc
-} from 'firebase/firestore';
+import { supabase } from './supabase';
 import {
   Play,
   Square,
@@ -92,12 +81,53 @@ export default function FieldStaffApp({ user, onLogout }) {
 
   // 1. Fetch real-time staff document for sync (routeHistory, status)
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'field_staff', user.docId), (docSnap) => {
-      if (docSnap.exists()) {
-        setStaffData(docSnap.data());
+    const fetchStaff = async () => {
+      const { data, error } = await supabase
+        .from('field_staff')
+        .select('*')
+        .eq('id', user.docId)
+        .single();
+      if (!error && data) {
+        setStaffData({
+          docId: data.id,
+          staffId: data.staff_id,
+          name: data.name,
+          phone: data.phone,
+          passcode: data.passcode,
+          status: data.status,
+          subscriptionPlan: data.subscription_plan,
+          registeredAt: data.registered_at,
+          subscriptionStartedAt: data.subscription_started_at,
+          subscriptionExpiredAt: data.subscription_expired_at,
+          assignedWholesalerId: data.assigned_wholesaler_id,
+          assignedWholesalerName: data.assigned_wholesaler_name,
+          lastLocation: {
+            lat: Number(data.last_location_lat || 19.0413),
+            lng: Number(data.last_location_lng || 72.8431),
+            timestamp: data.last_location_time
+          },
+          lastActive: data.last_active,
+          batteryPercentage: data.battery_percentage,
+          batteryCharging: data.battery_charging,
+          networkStatus: data.network_status,
+          routeHistory: typeof data.route_history === 'string' ? JSON.parse(data.route_history) : (data.route_history || []),
+          currentShopId: data.current_shop_id,
+          currentShopName: data.current_shop_name,
+          minutesSpentAtCurrentShop: data.minutes_spent_at_current_shop
+        });
       }
-    });
-    return () => unsub();
+    };
+
+    fetchStaff();
+
+    const channel = supabase
+      .channel(`field-staff-${user.docId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'field_staff', filter: `id=eq.${user.docId}` }, fetchStaff)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user.docId]);
 
   // 1b. Real connectivity monitor — checks every 15s and on network events
@@ -119,19 +149,38 @@ export default function FieldStaffApp({ user, onLogout }) {
 
   // 2. Fetch real-time wholesaler customers
   useEffect(() => {
-    const q = query(collection(db, 'wholesale_customers'), orderBy('shopName', 'asc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = [];
-      snapshot.forEach(docSnap => {
-        list.push({ id: docSnap.id, ...docSnap.data() });
-      });
-      setCustomers(list);
+    const fetchCustomers = async () => {
+      const { data, error } = await supabase
+        .from('wholesale_customers')
+        .select('*')
+        .order('shop_name', { ascending: true });
+      if (!error && data) {
+        setCustomers(data.map(row => ({
+          id: row.id,
+          uniqueId: row.unique_id,
+          shopName: row.shop_name,
+          proprietorName: row.proprietor_name,
+          phone: row.phone,
+          outstandingBalance: row.outstanding_balance,
+          route: row.route,
+          area: row.area,
+          address: row.address,
+          location: row.location_lat && row.location_lng ? { lat: Number(row.location_lat), lng: Number(row.location_lng) } : null
+        })));
+      }
       setIsLoadingCustomers(false);
-    }, (error) => {
-      console.error("Error loading customers:", error);
-      setIsLoadingCustomers(false);
-    });
-    return unsubscribe;
+    };
+
+    fetchCustomers();
+
+    const channel = supabase
+      .channel('field-staff-customers')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wholesale_customers' }, fetchCustomers)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   // 3. Keep track of check-in session and resume if page is reloaded
@@ -175,11 +224,16 @@ export default function FieldStaffApp({ user, onLogout }) {
   useEffect(() => {
     if (checkedInShop && isShiftActive && checkedInTime > 0 && checkedInTime % 60 === 0) {
       const minutes = Math.floor(checkedInTime / 60);
-      const staffRef = doc(db, 'field_staff', user.docId);
-      updateDoc(staffRef, {
-        minutesSpentAtCurrentShop: minutes,
-        lastActive: new Date().toISOString()
-      }).catch(err => console.error("Error updating minutes:", err));
+      supabase
+        .from('field_staff')
+        .update({
+          minutes_spent_at_current_shop: minutes,
+          last_active: new Date().toISOString()
+        })
+        .eq('id', user.docId)
+        .then(({ error }) => {
+          if (error) console.error("Error updating minutes:", error);
+        });
     }
   }, [checkedInTime, checkedInShop, isShiftActive]);
 
@@ -245,11 +299,14 @@ export default function FieldStaffApp({ user, onLogout }) {
 
     // 6d. Update Firestore Staff telemetry
     try {
-      const staffRef = doc(db, 'field_staff', user.docId);
-      const staffSnap = await getDoc(staffRef);
-      if (staffSnap.exists()) {
-        const currentData = staffSnap.data();
-        const currentHistory = currentData.routeHistory || [];
+      const { data: staff, error: fetchErr } = await supabase
+        .from('field_staff')
+        .select('route_history')
+        .eq('id', user.docId)
+        .single();
+      
+      if (!fetchErr && staff) {
+        let currentHistory = typeof staff.route_history === 'string' ? JSON.parse(staff.route_history) : (staff.route_history || []);
         
         const telemetryLog = {
           lat,
@@ -260,21 +317,26 @@ export default function FieldStaffApp({ user, onLogout }) {
           action: customAction || `Location updated via ${locationSource}`
         };
 
-        if (batteryPercentage <= 15) {
+        if (batteryPercentage !== null && batteryPercentage <= 15) {
           telemetryLog.action = `🚨 CRITICAL BATTERY ALERT: ${batteryPercentage}% - Location via ${locationSource}`;
         }
 
-        await updateDoc(staffRef, {
-          lastLocation: { lat, lng, timestamp },
-          lastActive: timestamp,
-          batteryPercentage,
-          batteryCharging,
-          networkStatus,
-          routeHistory: [...currentHistory, telemetryLog]
-        });
+        await supabase
+          .from('field_staff')
+          .update({
+            last_location_lat: lat,
+            last_location_lng: lng,
+            last_location_time: timestamp,
+            last_active: timestamp,
+            battery_percentage: batteryPercentage,
+            battery_charging: batteryCharging,
+            network_status: networkStatus,
+            route_history: [...currentHistory, telemetryLog]
+          })
+          .eq('id', user.docId);
       }
     } catch (err) {
-      console.error("Firestore telemetry save failed:", err);
+      console.error("Supabase telemetry save failed:", err);
     }
   };
 
@@ -342,28 +404,36 @@ export default function FieldStaffApp({ user, onLogout }) {
     const networkStatus = isOnline ? 'online' : 'offline';
 
     try {
-      const staffRef = doc(db, 'field_staff', user.docId);
-      const staffSnap = await getDoc(staffRef);
-      const currentHistory = staffSnap.exists() ? (staffSnap.data().routeHistory || []) : [];
+      const { data: staff } = await supabase
+        .from('field_staff')
+        .select('route_history')
+        .eq('id', user.docId)
+        .single();
+      const currentHistory = staff ? (typeof staff.route_history === 'string' ? JSON.parse(staff.route_history) : (staff.route_history || [])) : [];
 
-      await updateDoc(staffRef, {
-        lastLocation: { lat: initialLat, lng: initialLng, timestamp },
-        lastActive: timestamp,
-        batteryPercentage,
-        batteryCharging,
-        networkStatus,
-        routeHistory: [
-          ...currentHistory,
-          {
-            lat: initialLat,
-            lng: initialLng,
-            timestamp,
-            battery: batteryPercentage,
-            network: networkStatus,
-            action: "🏁 Shift Started"
-          }
-        ]
-      });
+      await supabase
+        .from('field_staff')
+        .update({
+          last_location_lat: initialLat,
+          last_location_lng: initialLng,
+          last_location_time: timestamp,
+          last_active: timestamp,
+          battery_percentage: batteryPercentage,
+          battery_charging: batteryCharging,
+          network_status: networkStatus,
+          route_history: [
+            ...currentHistory,
+            {
+              lat: initialLat,
+              lng: initialLng,
+              timestamp,
+              battery: batteryPercentage,
+              network: networkStatus,
+              action: "🏁 Shift Started"
+            }
+          ]
+        })
+        .eq('id', user.docId);
 
       setIsShiftActive(true);
       localStorage.setItem(`shift_active_${user.docId}`, 'true');
@@ -390,27 +460,33 @@ export default function FieldStaffApp({ user, onLogout }) {
     const networkStatus = isOnline ? 'online' : 'offline';
 
     try {
-      const staffRef = doc(db, 'field_staff', user.docId);
-      const staffSnap = await getDoc(staffRef);
-      const currentHistory = staffSnap.exists() ? (staffSnap.data().routeHistory || []) : [];
+      const { data: staff } = await supabase
+        .from('field_staff')
+        .select('route_history')
+        .eq('id', user.docId)
+        .single();
+      const currentHistory = staff ? (typeof staff.route_history === 'string' ? JSON.parse(staff.route_history) : (staff.route_history || [])) : [];
 
-      await updateDoc(staffRef, {
-        lastActive: timestamp,
-        currentShopId: '',
-        currentShopName: '',
-        minutesSpentAtCurrentShop: 0,
-        routeHistory: [
-          ...currentHistory,
-          {
-            lat,
-            lng,
-            timestamp,
-            battery: batteryPercentage,
-            network: networkStatus,
-            action: "🏁 Shift Ended"
-          }
-        ]
-      });
+      await supabase
+        .from('field_staff')
+        .update({
+          last_active: timestamp,
+          current_shop_id: '',
+          current_shop_name: '',
+          minutes_spent_at_current_shop: 0,
+          route_history: [
+            ...currentHistory,
+            {
+              lat,
+              lng,
+              timestamp,
+              battery: batteryPercentage,
+              network: networkStatus,
+              action: "🏁 Shift Ended"
+            }
+          ]
+        })
+        .eq('id', user.docId);
 
       setIsShiftActive(false);
       localStorage.removeItem(`shift_active_${user.docId}`);
@@ -452,28 +528,36 @@ export default function FieldStaffApp({ user, onLogout }) {
     const networkStatus = isOnline ? 'online' : 'offline';
 
     try {
-      const staffRef = doc(db, 'field_staff', user.docId);
-      const staffSnap = await getDoc(staffRef);
-      const currentHistory = staffSnap.exists() ? (staffSnap.data().routeHistory || []) : [];
+      const { data: staff } = await supabase
+        .from('field_staff')
+        .select('route_history')
+        .eq('id', user.docId)
+        .single();
+      const currentHistory = staff ? (typeof staff.route_history === 'string' ? JSON.parse(staff.route_history) : (staff.route_history || [])) : [];
 
-      await updateDoc(staffRef, {
-        currentShopId: shop.id,
-        currentShopName: shop.shopName,
-        minutesSpentAtCurrentShop: 0,
-        lastLocation: { lat, lng, timestamp },
-        lastActive: timestamp,
-        routeHistory: [
-          ...currentHistory,
-          {
-            lat,
-            lng,
-            timestamp,
-            battery: batteryPercentage,
-            network: networkStatus,
-            action: `Checked-in at ${shop.shopName}`
-          }
-        ]
-      });
+      await supabase
+        .from('field_staff')
+        .update({
+          current_shop_id: shop.id,
+          current_shop_name: shop.shopName,
+          minutes_spent_at_current_shop: 0,
+          last_location_lat: lat,
+          last_location_lng: lng,
+          last_location_time: timestamp,
+          last_active: timestamp,
+          route_history: [
+            ...currentHistory,
+            {
+              lat,
+              lng,
+              timestamp,
+              battery: batteryPercentage,
+              network: networkStatus,
+              action: `Checked-in at ${shop.shopName}`
+            }
+          ]
+        })
+        .eq('id', user.docId);
 
       setCheckedInShop(shop);
       setCheckedInTime(0);
@@ -509,28 +593,36 @@ export default function FieldStaffApp({ user, onLogout }) {
     const networkStatus = isOnline ? 'online' : 'offline';
 
     try {
-      const staffRef = doc(db, 'field_staff', user.docId);
-      const staffSnap = await getDoc(staffRef);
-      const currentHistory = staffSnap.exists() ? (staffSnap.data().routeHistory || []) : [];
+      const { data: staff } = await supabase
+        .from('field_staff')
+        .select('route_history')
+        .eq('id', user.docId)
+        .single();
+      const currentHistory = staff ? (typeof staff.route_history === 'string' ? JSON.parse(staff.route_history) : (staff.route_history || [])) : [];
 
-      await updateDoc(staffRef, {
-        currentShopId: '',
-        currentShopName: '',
-        minutesSpentAtCurrentShop: 0,
-        lastLocation: { lat, lng, timestamp },
-        lastActive: timestamp,
-        routeHistory: [
-          ...currentHistory,
-          {
-            lat,
-            lng,
-            timestamp,
-            battery: batteryPercentage,
-            network: networkStatus,
-            action: `Checked-out from ${shop.shopName}`
-          }
-        ]
-      });
+      await supabase
+        .from('field_staff')
+        .update({
+          current_shop_id: '',
+          current_shop_name: '',
+          minutes_spent_at_current_shop: 0,
+          last_location_lat: lat,
+          last_location_lng: lng,
+          last_location_time: timestamp,
+          last_active: timestamp,
+          route_history: [
+            ...currentHistory,
+            {
+              lat,
+              lng,
+              timestamp,
+              battery: batteryPercentage,
+              network: networkStatus,
+              action: `Checked-out from ${shop.shopName}`
+            }
+          ]
+        })
+        .eq('id', user.docId);
 
       setCheckedInShop(null);
       setCheckedInTime(0);
@@ -560,44 +652,61 @@ export default function FieldStaffApp({ user, onLogout }) {
 
     try {
       // 12a. Log transaction payment receipt in wholesale_payments
-      await addDoc(collection(db, 'wholesale_payments'), {
-        customerId: checkedInShop.id,
-        customerName: checkedInShop.shopName,
-        amount,
-        paymentMethod: 'Cash',
-        notes: collectNotes.trim() || `Collected by field staff: ${user.name}`,
-        date: dateStr,
-        timestamp
-      });
+      const { error: paymentError } = await supabase
+        .from('wholesale_payments')
+        .insert({
+          customer_id: checkedInShop.id,
+          customer_name: checkedInShop.shopName,
+          amount,
+          payment_method: 'Cash',
+          notes: collectNotes.trim() || `Collected by field staff: ${user.name}`,
+          payment_date: dateStr,
+          created_at: timestamp
+        });
+
+      if (paymentError) throw paymentError;
 
       // 12b. Subtract outstanding dues on customer profile
-      const customerRef = doc(db, 'wholesale_customers', checkedInShop.id);
-      await updateDoc(customerRef, {
-        outstandingBalance: increment(-amount)
-      });
+      const currentBalance = checkedInShop.outstandingBalance || 0;
+      const updatedBalance = currentBalance - amount;
+
+      const { error: customerError } = await supabase
+        .from('wholesale_customers')
+        .update({
+          outstanding_balance: updatedBalance
+        })
+        .eq('id', checkedInShop.id);
+
+      if (customerError) throw customerError;
 
       // 12c. Log action entry inside staff's routeHistory
-      const staffRef = doc(db, 'field_staff', user.docId);
-      const staffSnap = await getDoc(staffRef);
-      const currentHistory = staffSnap.exists() ? (staffSnap.data().routeHistory || []) : [];
+      const { data: staff } = await supabase
+        .from('field_staff')
+        .select('route_history')
+        .eq('id', user.docId)
+        .single();
+      const currentHistory = staff ? (typeof staff.route_history === 'string' ? JSON.parse(staff.route_history) : (staff.route_history || [])) : [];
 
       let lat = staffData?.lastLocation?.lat || checkedInShop.location?.lat || 19.0413;
       let lng = staffData?.lastLocation?.lng || checkedInShop.location?.lng || 72.8431;
 
-      await updateDoc(staffRef, {
-        lastActive: timestamp,
-        routeHistory: [
-          ...currentHistory,
-          {
-            lat,
-            lng,
-            timestamp,
-            battery: staffData?.batteryPercentage || 100,
-            network: isOnline ? 'online' : 'offline',
-            action: `Collected Cash ₹${amount.toLocaleString('en-IN')} at ${checkedInShop.shopName}`
-          }
-        ]
-      });
+      await supabase
+        .from('field_staff')
+        .update({
+          last_active: timestamp,
+          route_history: [
+            ...currentHistory,
+            {
+              lat,
+              lng,
+              timestamp,
+              battery: staffData?.batteryPercentage || 100,
+              network: isOnline ? 'online' : 'offline',
+              action: `Collected Cash ₹${amount.toLocaleString('en-IN')} at ${checkedInShop.shopName}`
+            }
+          ]
+        })
+        .eq('id', user.docId);
 
       setShowPaymentModal(false);
       setCollectAmount('');
@@ -779,29 +888,39 @@ export default function FieldStaffApp({ user, onLogout }) {
                     const shop = customers.find(c => c.id === shopId);
                     if (shop && shop.location) {
                       const timestamp = new Date().toISOString();
-                      const staffRef = doc(db, 'field_staff', user.docId);
-                      const staffSnap = await getDoc(staffRef);
-                      const currentHistory = staffSnap.exists() ? (staffSnap.data().routeHistory || []) : [];
+                      
+                      const { data: staff } = await supabase
+                        .from('field_staff')
+                        .select('route_history')
+                        .eq('id', user.docId)
+                        .single();
+                      const currentHistory = staff ? (typeof staff.route_history === 'string' ? JSON.parse(staff.route_history) : (staff.route_history || [])) : [];
                       
                       const mockAction = `Simulated GPS Jump to ${shop.shopName}`;
                       const batteryPercentage = staffData?.batteryPercentage || 98;
                       const networkStatus = isOnline ? 'online' : 'offline';
 
-                      await updateDoc(staffRef, {
-                        lastLocation: { lat: shop.location.lat, lng: shop.location.lng, timestamp },
-                        lastActive: timestamp,
-                        routeHistory: [
-                          ...currentHistory,
-                          {
-                            lat: shop.location.lat,
-                            lng: shop.location.lng,
-                            timestamp,
-                            battery: batteryPercentage,
-                            network: networkStatus,
-                            action: mockAction
-                          }
-                        ]
-                      });
+                      await supabase
+                        .from('field_staff')
+                        .update({
+                          last_location_lat: shop.location.lat,
+                          last_location_lng: shop.location.lng,
+                          last_location_time: timestamp,
+                          last_active: timestamp,
+                          route_history: [
+                            ...currentHistory,
+                            {
+                              lat: shop.location.lat,
+                              lng: shop.location.lng,
+                              timestamp,
+                              battery: batteryPercentage,
+                              network: networkStatus,
+                              action: mockAction
+                            }
+                          ]
+                        })
+                        .eq('id', user.docId);
+
                       alert(`Mock Location Set: Teleported coordinates to ${shop.shopName} (${shop.location.lat.toFixed(5)}, ${shop.location.lng.toFixed(5)}).`);
                     }
                   }}

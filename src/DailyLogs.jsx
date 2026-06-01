@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db } from './firebase';
-import { collection, addDoc, query, where, getDocs, deleteDoc, doc, serverTimestamp, orderBy, onSnapshot } from 'firebase/firestore';
+import { supabase } from './supabase';
 import { Trash2, AlertCircle, PlusCircle, Sparkles, Receipt, CircleSlash, Users, FileSpreadsheet, FileText, Printer } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -53,35 +52,81 @@ export default function DailyLogs() {
 
   // Fetch all collections in real-time for Day Summary computations
   useEffect(() => {
-    const unSubSales = onSnapshot(collection(db, 'sales'), (snapshot) => {
-      const list = [];
-      snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
-      setAllSales(list);
-    });
+    const fetchAllData = async () => {
+      const { data: salesData } = await supabase.from('sales').select('*');
+      if (salesData) {
+        setAllSales(salesData.map(row => ({
+          id: row.id,
+          billNumber: row.bill_number,
+          date: row.date,
+          items: typeof row.items === 'string' ? JSON.parse(row.items) : (row.items || []),
+          subtotal: Number(row.subtotal),
+          discount: Number(row.discount),
+          total: Number(row.total),
+          paymentMethod: row.payment_method,
+          workerName: row.worker_name,
+          shift: row.shift,
+          timestamp: { toDate: () => new Date(row.created_at) }
+        })));
+      }
 
-    const unSubStock = onSnapshot(collection(db, 'stock_inwards'), (snapshot) => {
-      const list = [];
-      snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
-      setAllStockInwards(list);
-    });
+      const { data: stockData } = await supabase.from('stock_inwards').select('*');
+      if (stockData) {
+        setAllStockInwards(stockData.map(row => ({
+          id: row.id,
+          supplierId: row.supplier_id,
+          supplierName: row.supplier_name,
+          vehicleNo: row.vehicle_no,
+          rate: Number(row.rate),
+          weight: Number(row.weight),
+          numberOfBirds: Number(row.number_of_birds),
+          chickenType: row.chicken_type,
+          paymentMode: row.payment_mode,
+          chequeDate: row.cheque_date,
+          chequeNumber: row.cheque_number,
+          bankName: row.bank_name,
+          totalValue: Number(row.total_value),
+          timestamp: { toDate: () => new Date(row.created_at) }
+        })));
+      }
 
-    const unSubExpensesAll = onSnapshot(collection(db, 'expenses'), (snapshot) => {
-      const list = [];
-      snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
-      setAllExpenses(list);
-    });
+      const { data: expensesData } = await supabase.from('expenses').select('*');
+      if (expensesData) {
+        setAllExpenses(expensesData.map(row => ({
+          id: row.id,
+          date: row.date,
+          name: row.name,
+          amount: Number(row.amount),
+          paymentMode: row.payment_mode,
+          timestamp: { toDate: () => new Date(row.created_at) }
+        })));
+      }
 
-    const unSubMortalityAll = onSnapshot(collection(db, 'mortality'), (snapshot) => {
-      const list = [];
-      snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
-      setAllMortality(list);
-    });
+      const { data: mortalityData } = await supabase.from('mortality').select('*');
+      if (mortalityData) {
+        setAllMortality(mortalityData.map(row => ({
+          id: row.id,
+          date: row.date,
+          birdsDead: Number(row.birds_dead),
+          weightLoss: Number(row.weight_loss),
+          reason: row.reason,
+          timestamp: { toDate: () => new Date(row.created_at) }
+        })));
+      }
+    };
+
+    fetchAllData();
+
+    const channel = supabase
+      .channel('dailylogs-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, fetchAllData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_inwards' }, fetchAllData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, fetchAllData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mortality' }, fetchAllData)
+      .subscribe();
 
     return () => {
-      unSubSales();
-      unSubStock();
-      unSubExpensesAll();
-      unSubMortalityAll();
+      supabase.removeChannel(channel);
     };
   }, []);
 
@@ -310,26 +355,42 @@ export default function DailyLogs() {
 
   // Fetch all workers in real-time
   useEffect(() => {
-    const qW = query(collection(db, 'workers'), orderBy('timestamp', 'desc'));
-    const unSubW = onSnapshot(qW, (snapshot) => {
-      const list = [];
-      snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
-      setAllWorkers(list);
-    }, (error) => {
-      console.error("Error loading workers: ", error);
-    });
-    return () => unSubW();
+    const fetchWorkers = async () => {
+      const { data, error } = await supabase
+        .from('workers')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (!error && data) {
+        setAllWorkers(data.map(row => ({
+          id: row.id,
+          name: row.name,
+          shift: row.shift,
+          createdAt: row.created_at
+        })));
+      }
+    };
+    fetchWorkers();
+
+    const channel = supabase
+      .channel('workers-logs')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'workers' }, fetchWorkers)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const handleAddWorker = async (e) => {
     e.preventDefault();
     if (!newWorkerName.trim()) return;
     try {
-      await addDoc(collection(db, 'workers'), {
+      const { error } = await supabase.from('workers').insert({
         name: newWorkerName.trim(),
         shift: newWorkerShift,
-        timestamp: serverTimestamp()
+        created_at: new Date().toISOString()
       });
+      if (error) throw error;
       setNewWorkerName('');
       alert('Worker successfully added!');
     } catch (err) {
@@ -341,7 +402,8 @@ export default function DailyLogs() {
   const deleteWorker = async (id) => {
     if (!confirm('Are you sure you want to delete this worker?')) return;
     try {
-      await deleteDoc(doc(db, 'workers', id));
+      const { error } = await supabase.from('workers').delete().eq('id', id);
+      if (error) throw error;
     } catch (err) {
       console.error(err);
       alert('Failed to delete worker.');
@@ -350,31 +412,40 @@ export default function DailyLogs() {
 
   // Load Expenses & Mortality for selected date
   useEffect(() => {
-    // Live update query for Expenses on selected logDate
-    const qExpenses = query(
-      collection(db, 'expenses'),
-      where('date', '==', logDate)
-    );
-    const unSubExpenses = onSnapshot(qExpenses, (snapshot) => {
-      const data = [];
-      snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
-      setExpensesList(data);
-    });
+    const fetchLogDetails = async () => {
+      const { data: expData } = await supabase.from('expenses').select('*').eq('date', logDate);
+      if (expData) {
+        setExpensesList(expData.map(row => ({
+          id: row.id,
+          date: row.date,
+          name: row.name,
+          amount: Number(row.amount),
+          paymentMode: row.payment_mode
+        })));
+      }
 
-    // Live update query for Mortality on selected logDate
-    const qMortality = query(
-      collection(db, 'mortality'),
-      where('date', '==', logDate)
-    );
-    const unSubMortality = onSnapshot(qMortality, (snapshot) => {
-      const data = [];
-      snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
-      setMortalityList(data);
-    });
+      const { data: mortData } = await supabase.from('mortality').select('*').eq('date', logDate);
+      if (mortData) {
+        setMortalityList(mortData.map(row => ({
+          id: row.id,
+          date: row.date,
+          birdsDead: Number(row.birds_dead),
+          weightLoss: Number(row.weight_loss),
+          reason: row.reason
+        })));
+      }
+    };
+
+    fetchLogDetails();
+
+    const channel = supabase
+      .channel('dailylogs-details-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, fetchLogDetails)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mortality' }, fetchLogDetails)
+      .subscribe();
 
     return () => {
-      unSubExpenses();
-      unSubMortality();
+      supabase.removeChannel(channel);
     };
   }, [logDate]);
 
@@ -385,12 +456,13 @@ export default function DailyLogs() {
     if (!finalName || !expenseAmount) return;
 
     try {
-      await addDoc(collection(db, 'expenses'), {
+      const { error } = await supabase.from('expenses').insert({
         date: logDate,
         name: finalName,
         amount: parseFloat(expenseAmount),
-        timestamp: serverTimestamp()
+        created_at: new Date().toISOString()
       });
+      if (error) throw error;
       setExpenseName('');
       setExpenseAmount('');
       setSelectedExpense(commonExpenseItems[0]);
@@ -403,7 +475,8 @@ export default function DailyLogs() {
   // Delete Expense
   const deleteExpense = async (id) => {
     try {
-      await deleteDoc(doc(db, 'expenses', id));
+      const { error } = await supabase.from('expenses').delete().eq('id', id);
+      if (error) throw error;
     } catch (err) {
       console.error(err);
     }
@@ -415,14 +488,13 @@ export default function DailyLogs() {
     if (!birdsDead || !weightLoss) return;
 
     try {
-      // Overwrite or add mortality log for this day
-      // For simplicity, we just addDoc. We can sum up multiple entries for the same day in reports.
-      await addDoc(collection(db, 'mortality'), {
+      const { error } = await supabase.from('mortality').insert({
         date: logDate,
-        birdsDead: parseInt(birdsDead),
-        weightLoss: parseFloat(weightLoss),
-        timestamp: serverTimestamp()
+        birds_dead: parseInt(birdsDead),
+        weight_loss: parseFloat(weightLoss),
+        created_at: new Date().toISOString()
       });
+      if (error) throw error;
       setBirdsDead('');
       setWeightLoss('');
       alert('Mortality log added successfully!');
@@ -435,7 +507,8 @@ export default function DailyLogs() {
   // Delete Mortality Entry
   const deleteMortality = async (id) => {
     try {
-      await deleteDoc(doc(db, 'mortality', id));
+      const { error } = await supabase.from('mortality').delete().eq('id', id);
+      if (error) throw error;
     } catch (err) {
       console.error(err);
     }

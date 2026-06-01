@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Save, Tag, RefreshCw, Loader2 } from 'lucide-react';
-import { db } from './firebase';
-import { doc, writeBatch } from 'firebase/firestore';
+import { supabase } from './supabase';
 
 export default function DailyRates({ products, setProducts }) {
   const [localRates, setLocalRates] = useState(() => {
@@ -33,15 +32,15 @@ export default function DailyRates({ products, setProducts }) {
   const saveRates = async () => {
     setIsSaving(true);
     try {
-      const batch = writeBatch(db);
-      
-      products.forEach(p => {
-        const docRef = doc(db, 'retail_products', p.id.toString());
+      await Promise.all(products.map(async (p) => {
         const newRate = localRates[p.id] !== undefined ? localRates[p.id] : p.rate;
-        batch.update(docRef, { rate: newRate });
-      });
+        const { error } = await supabase
+          .from('retail_products')
+          .update({ rate: newRate })
+          .eq('id', p.id);
+        if (error) throw error;
+      }));
 
-      await batch.commit();
       alert('Rates saved to cloud successfully!');
     } catch (err) {
       console.error('Failed to save rates:', err);

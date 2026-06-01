@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Plus, Minus, Trash2, Printer, CreditCard, Banknote, ShoppingCart, UserCheck, CheckCircle2, Bluetooth, AlertTriangle, X, Info, Receipt, IndianRupee } from 'lucide-react';
 import { shopDetails } from './data';
-import { db } from './firebase';
-import { collection, addDoc, serverTimestamp, query, onSnapshot, orderBy, limit } from 'firebase/firestore';
+import { supabase } from './supabase';
 
 export default function BillingPOS({ products }) {
   const [cart, setCart] = useState([]);
@@ -56,13 +55,19 @@ export default function BillingPOS({ products }) {
   const [activeWorker, setActiveWorker] = useState('Imran Khan');
 
   useEffect(() => {
-    const qWorkers = query(collection(db, 'workers'));
-    const unsubscribe = onSnapshot(qWorkers, (snapshot) => {
-      const list = [];
-      snapshot.forEach(doc => {
-        list.push({ id: doc.id, ...doc.data() });
-      });
-      if (list.length > 0) {
+    const fetchWorkers = async () => {
+      const { data, error } = await supabase.from('workers').select('*');
+      if (!error && data && data.length > 0) {
+        const list = data.map(row => ({
+          id: row.id,
+          name: row.name,
+          phone: row.phone,
+          role: row.role,
+          shift: row.shift,
+          pinCode: row.pin_code,
+          isActive: row.is_active,
+          createdAt: row.created_at
+        }));
         setWorkers(list);
         // Automatically ensure activeWorker is one of the loaded workers
         const activeExists = list.some(w => w.name === activeWorker);
@@ -76,24 +81,59 @@ export default function BillingPOS({ products }) {
         ]);
         setActiveWorker('Imran Khan');
       }
-    });
-    return () => unsubscribe();
+    };
+    fetchWorkers();
+
+    const channel = supabase
+      .channel('workers-billing')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'workers' }, () => {
+        fetchWorkers();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [activeWorker]);
 
   useEffect(() => {
-    const qRecent = query(
-      collection(db, 'sales'),
-      orderBy('timestamp', 'desc'),
-      limit(100)
-    );
-    const unsubscribe = onSnapshot(qRecent, (snapshot) => {
-      const list = [];
-      snapshot.forEach(doc => {
-        list.push({ id: doc.id, ...doc.data() });
-      });
-      setRecentSales(list);
-    });
-    return () => unsubscribe();
+    const fetchRecentSales = async () => {
+      const { data, error } = await supabase
+        .from('sales')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100);
+      if (!error && data) {
+        const list = data.map(row => ({
+          id: row.id,
+          billNumber: row.bill_number,
+          date: row.date,
+          items: typeof row.items === 'string' ? JSON.parse(row.items) : (row.items || []),
+          subtotal: Number(row.subtotal),
+          discount: Number(row.discount),
+          total: Number(row.total),
+          paymentMethod: row.payment_method,
+          workerName: row.worker_name,
+          shift: row.shift,
+          timestamp: {
+            toDate: () => new Date(row.created_at)
+          }
+        }));
+        setRecentSales(list);
+      }
+    };
+    fetchRecentSales();
+
+    const channel = supabase
+      .channel('sales-billing')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, () => {
+        fetchRecentSales();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const filteredProducts = products.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -154,21 +194,24 @@ export default function BillingPOS({ products }) {
 
       const activeWorkerObj = workers.find(w => w.name === activeWorker);
 
-      await addDoc(collection(db, 'sales'), {
-        items,
-        subtotal,
-        discount,
-        total,
-        paymentMethod: mode,
-        workerName: activeWorker,
-        shift: activeWorkerObj ? activeWorkerObj.shift : 'Morning Shift',
-        timestamp: serverTimestamp()
-      });
+      const { error } = await supabase
+        .from('sales')
+        .insert({
+          items,
+          subtotal,
+          discount,
+          total,
+          payment_method: mode,
+          worker_name: activeWorker,
+          shift: activeWorkerObj ? activeWorkerObj.shift : 'Morning Shift',
+          created_at: new Date().toISOString()
+        });
+      if (error) throw error;
 
       setIsPaid(true);
       setPaymentMethod(mode);
     } catch (error) {
-      console.error("Error saving sale to Firebase: ", error);
+      console.error("Error saving sale to Supabase: ", error);
       alert("Error saving sale. Check console.");
     }
   };

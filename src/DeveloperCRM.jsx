@@ -6,8 +6,7 @@ import {
   CreditCard, Smartphone, Globe, RefreshCw, AlertCircle, IndianRupee,
   Battery, Wifi, WifiOff, Search
 } from 'lucide-react';
-import { db } from './firebase';
-import { collection, onSnapshot, query, doc, deleteDoc, runTransaction, updateDoc } from 'firebase/firestore';
+import { supabase } from './supabase';
 
 const calculateExpiryDate = (startDateStr, plan) => {
   if (!startDateStr) return '';
@@ -57,15 +56,51 @@ export default function DeveloperCRM({ user, onLogout }) {
   });
 
   useEffect(() => {
-    const q = query(collection(db, 'field_staff'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = [];
-      snapshot.forEach(doc => {
-        list.push({ docId: doc.id, ...doc.data() });
-      });
-      setFieldStaff(list);
-    });
-    return unsubscribe;
+    const fetchStaff = async () => {
+      const { data, error } = await supabase
+        .from('field_staff')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (!error && data) {
+        setFieldStaff(data.map(row => ({
+          docId: row.id,
+          staffId: row.staff_id,
+          name: row.name,
+          phone: row.phone,
+          passcode: row.passcode,
+          status: row.status,
+          subscriptionPlan: row.subscription_plan,
+          registeredAt: row.registered_at,
+          subscriptionStartedAt: row.subscription_started_at,
+          subscriptionExpiredAt: row.subscription_expired_at,
+          assignedWholesalerId: row.assigned_wholesaler_id,
+          assignedWholesalerName: row.assigned_wholesaler_name,
+          lastLocation: {
+            lat: row.last_location_lat,
+            lng: row.last_location_lng,
+            timestamp: row.last_location_time
+          },
+          lastActive: row.last_active,
+          batteryPercentage: row.battery_percentage,
+          batteryCharging: row.battery_charging,
+          networkStatus: row.network_status,
+          routeHistory: typeof row.route_history === 'string' ? JSON.parse(row.route_history) : (row.route_history || []),
+          currentShopId: row.current_shop_id,
+          currentShopName: row.current_shop_name,
+          minutesSpentAtCurrentShop: row.minutes_spent_at_current_shop
+        })));
+      }
+    };
+    fetchStaff();
+
+    const channel = supabase
+      .channel('field-staff-crm')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'field_staff' }, fetchStaff)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const [shops, setShops] = useState(() => {
@@ -424,42 +459,31 @@ export default function DeveloperCRM({ user, onLogout }) {
       const wholesaler = shops.find(s => s.customerUniqueId === newStaff.assignedWholesalerId);
       const wholesalerName = wholesaler ? wholesaler.shopName : 'Momin Chicken';
 
-      await runTransaction(db, async (transaction) => {
-        const counterRef = doc(db, 'counters', 'field_staff_id');
-        const counterDoc = await transaction.get(counterRef);
+      const todayStr = new Date().toISOString().split('T')[0];
+      const subStart = newStaff.status === 'Active' ? todayStr : null;
+      const subExpiry = newStaff.status === 'Active' ? calculateExpiryDate(todayStr, newStaff.subscriptionPlan || 'Monthly') : null;
 
-        let nextVal = 1001;
-        if (counterDoc.exists() && counterDoc.data().currentValue) {
-          nextVal = counterDoc.data().currentValue + 1;
-        }
-
-        transaction.set(counterRef, { currentValue: nextVal }, { merge: true });
-
-        const staffIdStr = `FS-${nextVal}`;
-        const newStaffRef = doc(collection(db, 'field_staff'));
-        
-        const todayStr = new Date().toISOString().split('T')[0];
-        const subStart = newStaff.status === 'Active' ? todayStr : '';
-        const subExpiry = newStaff.status === 'Active' ? calculateExpiryDate(todayStr, newStaff.subscriptionPlan || 'Monthly') : '';
-
-        transaction.set(newStaffRef, {
-          staffId: staffIdStr,
+      const { data, error } = await supabase
+        .from('field_staff')
+        .insert([{
           name: newStaff.name.trim(),
           phone: newStaff.phone.trim(),
           passcode: newStaff.passcode.trim(),
-          assignedWholesalerId: newStaff.assignedWholesalerId,
-          assignedWholesalerName: wholesalerName,
+          assigned_wholesaler_id: newStaff.assignedWholesalerId,
+          assigned_wholesaler_name: wholesalerName,
           status: newStaff.status,
-          subscriptionPlan: newStaff.subscriptionPlan || 'Monthly',
-          registeredAt: todayStr,
-          subscriptionStartedAt: subStart,
-          subscriptionExpiredAt: subExpiry,
-          batteryPercentage: 100,
-          batteryCharging: false,
-          networkStatus: 'online',
-          lastLocation: { lat: 19.0413, lng: 72.8431, timestamp: new Date().toISOString() },
-          lastActive: new Date().toISOString(),
-          routeHistory: [
+          subscription_plan: newStaff.subscriptionPlan || 'Monthly',
+          registered_at: todayStr,
+          subscription_started_at: subStart,
+          subscription_expired_at: subExpiry,
+          battery_percentage: 100,
+          battery_charging: false,
+          network_status: 'online',
+          last_location_lat: 19.0413,
+          last_location_lng: 72.8431,
+          last_location_time: new Date().toISOString(),
+          last_active: new Date().toISOString(),
+          route_history: [
             {
               lat: 19.0413,
               lng: 72.8431,
@@ -469,8 +493,10 @@ export default function DeveloperCRM({ user, onLogout }) {
               action: 'License Created'
             }
           ]
-        });
-      });
+        }])
+        .select();
+
+      if (error) throw error;
 
       setShowAddStaffModal(false);
       setNewStaff({
@@ -494,16 +520,19 @@ export default function DeveloperCRM({ user, onLogout }) {
   const handleToggleStaffStatus = async (docId, currentStatus) => {
     const newStatus = currentStatus === 'Active' ? 'Inactive' : 'Active';
     try {
-      const staffRef = doc(db, 'field_staff', docId);
       const staff = fieldStaff.find(s => s.docId === docId);
       
       const updateData = { status: newStatus };
       if (newStatus === 'Active') {
         const start = staff?.subscriptionStartedAt || new Date().toISOString().split('T')[0];
-        updateData.subscriptionStartedAt = start;
-        updateData.subscriptionExpiredAt = calculateExpiryDate(start, staff?.subscriptionPlan || 'Monthly');
+        updateData.subscription_started_at = start;
+        updateData.subscription_expired_at = calculateExpiryDate(start, staff?.subscriptionPlan || 'Monthly');
       }
-      await updateDoc(staffRef, updateData);
+      const { error } = await supabase
+        .from('field_staff')
+        .update(updateData)
+        .eq('id', docId);
+      if (error) throw error;
     } catch (err) {
       console.error("Error updating staff status:", err);
       alert("Failed to update status.");
@@ -512,16 +541,19 @@ export default function DeveloperCRM({ user, onLogout }) {
 
   const handleUpdateStaffStatus = async (docId, newStatus) => {
     try {
-      const staffRef = doc(db, 'field_staff', docId);
       const staff = fieldStaff.find(s => s.docId === docId);
       
       const updateData = { status: newStatus };
       if (newStatus === 'Active') {
         const start = staff?.subscriptionStartedAt || new Date().toISOString().split('T')[0];
-        updateData.subscriptionStartedAt = start;
-        updateData.subscriptionExpiredAt = calculateExpiryDate(start, staff?.subscriptionPlan || 'Monthly');
+        updateData.subscription_started_at = start;
+        updateData.subscription_expired_at = calculateExpiryDate(start, staff?.subscriptionPlan || 'Monthly');
       }
-      await updateDoc(staffRef, updateData);
+      const { error } = await supabase
+        .from('field_staff')
+        .update(updateData)
+        .eq('id', docId);
+      if (error) throw error;
     } catch (err) {
       console.error("Error updating staff status:", err);
       alert("Failed to update status.");
@@ -530,16 +562,19 @@ export default function DeveloperCRM({ user, onLogout }) {
 
   const handleUpdateStaffPlan = async (docId, newPlan) => {
     try {
-      const staffRef = doc(db, 'field_staff', docId);
       const staff = fieldStaff.find(s => s.docId === docId);
       const start = staff?.subscriptionStartedAt || new Date().toISOString().split('T')[0];
       const expiry = calculateExpiryDate(start, newPlan);
 
-      await updateDoc(staffRef, { 
-        subscriptionPlan: newPlan,
-        subscriptionExpiredAt: expiry,
-        subscriptionStartedAt: start
-      });
+      const { error } = await supabase
+        .from('field_staff')
+        .update({ 
+          subscription_plan: newPlan,
+          subscription_expired_at: expiry,
+          subscription_started_at: start
+        })
+        .eq('id', docId);
+      if (error) throw error;
     } catch (err) {
       console.error("Error updating staff plan:", err);
       alert("Failed to update staff license plan.");
@@ -549,8 +584,11 @@ export default function DeveloperCRM({ user, onLogout }) {
   const handleDeleteStaff = async (docId) => {
     if (window.confirm("Are you sure you want to delete this field staff license? This will revoke mobile app access immediately.")) {
       try {
-        const staffRef = doc(db, 'field_staff', docId);
-        await deleteDoc(staffRef);
+        const { error } = await supabase
+          .from('field_staff')
+          .delete()
+          .eq('id', docId);
+        if (error) throw error;
       } catch (err) {
         console.error("Error deleting staff:", err);
         alert("Failed to delete staff license.");
