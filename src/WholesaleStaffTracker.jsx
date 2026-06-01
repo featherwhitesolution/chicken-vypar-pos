@@ -963,9 +963,9 @@ export default function WholesaleStaffTracker() {
                   </div>
 
                   {/* Leaflet Map Canvas */}
-                  <div className="relative border border-slate-100 dark:border-slate-800 bg-[#f7fafc] dark:bg-slate-950 rounded-2xl overflow-hidden aspect-[500/300] w-full flex items-center justify-center z-0">
+                  <div className="relative border border-slate-100 dark:border-slate-800 bg-[#f7fafc] dark:bg-slate-950 rounded-2xl overflow-hidden w-full h-[400px] sm:h-[480px] md:h-[550px] flex items-center justify-center z-0">
                     {mappedCustomers.length > 0 ? (
-                      <div ref={mapContainerRef} className="w-full h-full" style={{ minHeight: '300px' }} />
+                      <div ref={mapContainerRef} className="w-full h-full" />
                     ) : (
                       <div className="text-slate-400 text-xs text-center py-12 flex flex-col items-center gap-2">
                         <Loader2 className="w-6 h-6 animate-spin text-slate-350" />
