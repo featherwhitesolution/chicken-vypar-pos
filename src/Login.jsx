@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Store, Tractor, Building2, User, Lock, ArrowRight, Shield, Smartphone } from 'lucide-react';
+import { Store, Tractor, Building2, User, Lock, ArrowRight, Shield, Smartphone, Eye, EyeOff } from 'lucide-react';
 import { supabase } from './supabase';
 
 export default function Login({ onLogin }) {
@@ -11,6 +11,7 @@ export default function Login({ onLogin }) {
   const [otpValue, setOtpValue] = useState('');
   const [isSendingOtp, setIsSendingOtp] = useState(false);
   const [isVerifyingStaff, setIsVerifyingStaff] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   
   const handleLogin = (e) => {
     e.preventDefault();
@@ -134,6 +135,7 @@ export default function Login({ onLogin }) {
                     setLoginMethod('password');
                     setOtpSent(false);
                     setOtpValue('');
+                    setShowPassword(false);
                     if (r.id === 'Retailer') {
                       setUsername('9876543210');
                     } else {
@@ -216,13 +218,20 @@ export default function Login({ onLogin }) {
                       <Lock className="h-5 w-5 text-slate-400 group-focus-within:text-primary-500 transition-colors" />
                     </div>
                     <input
-                      type="password"
+                      type={showPassword ? "text" : "password"}
                       maxLength={role === 'Staff' ? "6" : undefined}
                       value={password}
                       onChange={(e) => setPassword(role === 'Staff' ? e.target.value.replace(/\D/g, '') : e.target.value)}
-                      className="block w-full pl-11 pr-4 py-3 border border-slate-200 dark:border-slate-700 rounded-xl bg-white/70 dark:bg-slate-900/70 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all outline-none"
+                      className="block w-full pl-11 pr-12 py-3 border border-slate-200 dark:border-slate-700 rounded-xl bg-white/70 dark:bg-slate-900/70 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all outline-none"
                       placeholder={role === 'Staff' ? 'Enter PIN Passcode (e.g. 1234)' : 'Enter password'}
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                    >
+                      {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                    </button>
                   </div>
                 </div>
               )}
@@ -236,6 +245,7 @@ export default function Login({ onLogin }) {
                     setLoginMethod(loginMethod === 'password' ? 'otp' : 'password');
                     setOtpSent(false);
                     setOtpValue('');
+                    setShowPassword(false);
                   }}
                   className="text-xs text-primary-600 dark:text-primary-400 font-bold hover:underline tracking-wide transition-all"
                 >
