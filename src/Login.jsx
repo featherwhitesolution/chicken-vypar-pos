@@ -16,7 +16,7 @@ export default function Login({ onLogin }) {
     e.preventDefault();
     const normalizedUser = username.trim().replace(/\s+/g, '');
 
-    if (normalizedUser === 'admin_farhan' && password === 'Farhans@27') {
+    if (normalizedUser === 'admin_farhan' && password === '123456') {
       onLogin({ username: normalizedUser, role: 'developer_admin' });
       return;
     }
