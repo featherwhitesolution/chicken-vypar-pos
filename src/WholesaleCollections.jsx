@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 
-import { DollarSign, Search, Navigation, Phone, CheckCircle2, Loader2, X, ClipboardList, Send, MapPin } from 'lucide-react';
+import { IndianRupee, Search, Navigation, Phone, CheckCircle2, Loader2, X, ClipboardList, Send, MapPin } from 'lucide-react';
 
 export default function WholesaleCollections() {
   const [customers, setCustomers] = useState([]);
@@ -130,7 +130,7 @@ export default function WholesaleCollections() {
   const getWhatsAppLink = (cust) => {
     const balance = cust.outstandingBalance || 0;
     const cages = cust.outstandingCrates || 0;
-    const phoneNo = cust.phone.replace(/\D/g, '');
+    const phoneNo = (cust.phone || '').replace(/\D/g, '');
     
     const message = `*MOMIN WHOLESALE CHICKEN - WEEKLY OUTSTANDING STATEMENT*\n\n` +
                     `Shop: *${cust.shopName}*\n` +
@@ -148,7 +148,7 @@ export default function WholesaleCollections() {
     const matchesRoute = selectedRoute ? c.route === selectedRoute : true;
     const matchesSearch = c.shopName.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           c.proprietorName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          c.phone.includes(searchQuery);
+                          (c.phone || '').includes(searchQuery);
     return matchesRoute && matchesSearch;
   });
 
@@ -235,7 +235,7 @@ export default function WholesaleCollections() {
                       onClick={() => handleOpenPaymentModal(cust)}
                       className="flex-1 py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center gap-1 cursor-pointer shadow-md shadow-emerald-500/10"
                     >
-                      <DollarSign className="w-3.5 h-3.5" /> Collect cash
+                      <IndianRupee className="w-3.5 h-3.5" /> Collect cash
                     </button>
                     
                     {/* Navigation */}
@@ -291,7 +291,7 @@ export default function WholesaleCollections() {
             </button>
 
             <h3 className="text-base font-bold text-slate-805 dark:text-white mb-4 flex items-center gap-1">
-              <DollarSign className="w-5 h-5 text-emerald-500" /> Log Cash Collection
+              <IndianRupee className="w-5 h-5 text-emerald-500" /> Log Cash Collection
             </h3>
             
             <div className="p-3 bg-emerald-50/50 dark:bg-emerald-950/20 rounded-2xl border border-emerald-100 dark:border-emerald-900/50 text-xs font-bold mb-4">

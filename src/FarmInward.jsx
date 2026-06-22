@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Truck, Scale, AlertTriangle, Save, CheckCircle2, History, Loader2, DollarSign, RefreshCw, Layers } from 'lucide-react';
+import { Truck, Scale, AlertTriangle, Save, CheckCircle2, History, Loader2, RefreshCw, Layers } from 'lucide-react';
 import { supabase } from './supabase';
 
 export default function FarmInward() {

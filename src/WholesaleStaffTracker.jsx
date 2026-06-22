@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabase';
 import { 
   Smartphone, Battery, Wifi, WifiOff, MapPin, History, User, 
-  DollarSign, Activity, ChevronRight, ChevronLeft, Play, Zap, AlertTriangle, 
+  IndianRupee, Activity, ChevronRight, ChevronLeft, Play, Zap, AlertTriangle, 
   Map, CheckCircle, RefreshCw, Loader2, Clock, BatteryCharging, Calendar
 } from 'lucide-react';
 import L from 'leaflet';
@@ -1013,7 +1013,7 @@ export default function WholesaleStaffTracker() {
                                         : 'bg-slate-50 text-slate-500 dark:bg-slate-800'
                                     }`}>
                                       {isCollection ? (
-                                        <DollarSign className="w-4 h-4 font-black" />
+                                        <IndianRupee className="w-4 h-4 font-black" />
                                       ) : isAlert ? (
                                         <AlertTriangle className="w-4 h-4" />
                                       ) : (

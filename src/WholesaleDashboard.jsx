@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
-import { DollarSign, Archive, UserCheck, TrendingUp, FileText, Compass, AlertTriangle, Sparkles, Map, IndianRupee, Save, RotateCcw, Loader2, Tag, Skull, Activity, PieChart as PieChartIcon } from 'lucide-react';
+import { Archive, UserCheck, TrendingUp, FileText, Compass, AlertTriangle, Sparkles, Map, IndianRupee, Save, RotateCcw, Loader2, Tag, Skull, Activity, PieChart as PieChartIcon } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 
 export default function WholesaleDashboard({ products = [] }) {

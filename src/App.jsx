@@ -342,17 +342,22 @@ function App() {
           await supabase.from('retail_products').insert(seedData);
           fetchProducts();
         } else {
-          const list = data.map(row => ({
-            id: row.id,
-            docId: row.id.toString(),
-            name: row.name,
-            rate: Number(row.rate),
-            category: row.category,
-            unit: row.unit,
-            isWeightBased: row.is_weight_based,
-            isActive: row.is_active,
-            sortOrder: row.sort_order
-          }));
+          const list = data.map(row => {
+            const localProduct = initialProducts.find(p => p.id === row.id) || {};
+            return {
+              id: row.id,
+              docId: row.id.toString(),
+              name: row.name,
+              rate: Number(row.rate),
+              category: row.category,
+              unit: row.unit,
+              isWeightBased: row.is_weight_based,
+              isActive: row.is_active,
+              sortOrder: row.sort_order,
+              image: localProduct.image || '',
+              emoji: localProduct.emoji || '🐓'
+            };
+          });
           setProducts(list);
         }
       }

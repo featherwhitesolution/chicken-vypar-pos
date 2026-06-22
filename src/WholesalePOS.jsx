@@ -20,12 +20,10 @@ export default function WholesalePOS({ products = [] }) {
   const [activeDispatches, setActiveDispatches] = useState([]);
   const [selectedTruckId, setSelectedTruckId] = useState('');
   
-  // Chicken Tare Calculation Form
+  // Chicken Form
   const [chickenForm, setChickenForm] = useState({
     birdsCount: '',
-    grossWeight: '',
-    cratesCount: '',
-    crateTare: '2.5',
+    netWeight: '',
     chickenType: 'BR'
   });
   
@@ -155,11 +153,7 @@ export default function WholesalePOS({ products = [] }) {
 
 
   // Live Calculations for Chicken Form
-  const gross = parseFloat(chickenForm.grossWeight) || 0;
-  const crates = parseInt(chickenForm.cratesCount) || 0;
-  const tarePerCrate = parseFloat(chickenForm.crateTare) || 2.5;
-  const computedTare = crates * tarePerCrate;
-  const computedNet = Math.max(0, gross - computedTare);
+  const computedNet = parseFloat(chickenForm.netWeight) || 0;
   const currentChickenRate = getCustomerRate(true);
   const estimatedChickenTotal = computedNet * currentChickenRate;
 
@@ -171,7 +165,7 @@ export default function WholesalePOS({ products = [] }) {
       return;
     }
     if (computedNet <= 0 || !chickenForm.birdsCount) {
-      alert("Please enter gross weight and bird count.");
+      alert("Please enter net weight and bird count.");
       return;
     }
 
@@ -180,9 +174,6 @@ export default function WholesalePOS({ products = [] }) {
       name: `Live Chicken (${chickenForm.chickenType})`,
       chickenType: chickenForm.chickenType,
       birdsCount: parseInt(chickenForm.birdsCount),
-      grossWeight: gross,
-      cratesCount: crates,
-      crateTare: tarePerCrate,
       quantity: computedNet, // net weight in kg
       rate: currentChickenRate,
       unit: 'kg',
@@ -190,14 +181,10 @@ export default function WholesalePOS({ products = [] }) {
     };
 
     setCart([...cart.filter(c => c.productId !== 1), item]);
-    // Pre-fill Crates Issued with cages used in Pos weight calculation
-    setCratesIssued(prev => prev || crates);
     // Reset Form
     setChickenForm({
       birdsCount: '',
-      grossWeight: '',
-      cratesCount: '',
-      crateTare: '2.5',
+      netWeight: '',
       chickenType: 'BR'
     });
   };
@@ -435,7 +422,7 @@ export default function WholesalePOS({ products = [] }) {
             </h3>
             
             <form onSubmit={handleAddChicken} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Breed</label>
                   <select
@@ -450,40 +437,17 @@ export default function WholesalePOS({ products = [] }) {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Gross Weight (kg)</label>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Net Weight (kg)</label>
                   <input
                     type="number"
                     step="0.01"
-                    value={chickenForm.grossWeight}
-                    onChange={e => setChickenForm({ ...chickenForm, grossWeight: e.target.value })}
+                    value={chickenForm.netWeight}
+                    onChange={e => setChickenForm({ ...chickenForm, netWeight: e.target.value })}
                     className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-sm font-bold text-slate-850 dark:text-white"
                     placeholder="0.0"
                   />
                 </div>
                 
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">No. of Cages / Crates</label>
-                  <input
-                    type="number"
-                    value={chickenForm.cratesCount}
-                    onChange={e => setChickenForm({ ...chickenForm, cratesCount: e.target.value })}
-                    className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-sm font-semibold"
-                    placeholder="0"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Cage Tare Weight (kg)</label>
-                  <input
-                    type="number"
-                    step="0.05"
-                    value={chickenForm.crateTare}
-                    onChange={e => setChickenForm({ ...chickenForm, crateTare: e.target.value })}
-                    className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-sm font-semibold"
-                    placeholder="2.5"
-                  />
-                </div>
-
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Bird Count</label>
                   <input
@@ -500,11 +464,7 @@ export default function WholesalePOS({ products = [] }) {
               <div className="p-4 bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800/80 rounded-2xl flex flex-wrap justify-between items-center gap-4 text-xs font-semibold">
                 <div className="flex gap-4">
                   <div>
-                    <span className="text-slate-400 block text-[9px] uppercase tracking-wider">Crate Tare Deductions</span>
-                    <span className="text-slate-700 dark:text-slate-300 font-bold">{computedTare.toFixed(1)} kg</span>
-                  </div>
-                  <div className="border-l border-slate-200 dark:border-slate-800 pl-4">
-                    <span className="text-slate-400 block text-[9px] uppercase tracking-wider">Calculated Net Weight</span>
+                    <span className="text-slate-400 block text-[9px] uppercase tracking-wider">Entered Net Weight</span>
                     <span className="text-emerald-600 dark:text-emerald-450 font-black text-sm">{computedNet.toFixed(1)} kg</span>
                   </div>
                 </div>
@@ -776,7 +736,7 @@ export default function WholesalePOS({ products = [] }) {
                 <div className="text-[8px] text-slate-500 space-y-0.5 border-b border-dashed border-slate-300 dark:border-slate-700 pb-1.5">
                   <p className="font-bold">Weighbridge Breakdown:</p>
                   {savedInvoice.items.filter(i => i.productId === 1).map((item, idx) => (
-                    <p key={idx}>Gross: {item.grossWeight} kg | Crates: {item.cratesCount} ({item.crateTare}kg tare) | Net: {item.quantity.toFixed(1)} kg</p>
+                    <p key={idx}>Net Weight: {item.quantity.toFixed(1)} kg @ ₹{item.rate}/kg</p>
                   ))}
                 </div>
               )}
